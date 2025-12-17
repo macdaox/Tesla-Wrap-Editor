@@ -9,6 +9,90 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as fabric from 'fabric';
 import { Download, Eraser, Image as ImageIcon, MousePointer2, Wand2, Wand, PaintBucket, ChevronDown, ZoomIn, ZoomOut, RotateCcw, Layers } from 'lucide-react';
 import { detectRegion, createBackgroundMask, createWhiteBackgroundCover, detectAllRegions } from '@/utils/image-processing';
+import { Globe } from 'lucide-react';
+
+const TRANSLATIONS = {
+  en: {
+    title: "Tesla Wrap Editor",
+    vehicleModel: "Vehicle Model",
+    styleTrim: "Style / Trim",
+    autoMask: "Auto Mask",
+    selectAll: "Select All",
+    clearMask: "Clear Mask",
+    templates: "Templates",
+    designTools: "Design Tools",
+    select: "Select",
+    fillColor: "Fill Color",
+    solidColor: "Solid Color",
+    useGradient: "Use Gradient",
+    gradientTip: "Tip: Drag on the car to set gradient direction!",
+    start: "Start",
+    end: "End",
+    uploadSticker: "Upload Sticker",
+    aiGeneration: "AI Generation",
+    aiPlaceholder: "Describe a texture or pattern...",
+    dreaming: "Dreaming...",
+    generateTexture: "Generate Texture",
+    resetAll: "Reset All",
+    exportDesign: "Export Design",
+    alertTemplateNotLoaded: "Template not loaded!",
+    alertRegionMasked: "Region masked! Now you can upload a sticker into this area.",
+    alertAiApplied: "AI Texture applied to your selection!",
+    alertNetworkError: "Network response was not ok",
+    alertAiFailed: "AI generation failed.",
+    alertNetworkBlocked: "Network blocked AI request. Generated a local pattern instead.",
+    // Vehicle Names
+    'Cybertruck': "Cybertruck",
+    'Model 3': "Model 3",
+    'Model 3 (2024+) Standard & Premium': "Model 3 (2024+) Standard & Premium",
+    'Model 3 (2024+) Performance': "Model 3 (2024+) Performance",
+    'Model Y': "Model Y",
+    'Model Y (2025+) Standard': "Model Y (2025+) Standard",
+    'Model Y (2025+) Premium': "Model Y (2025+) Premium",
+    'Model Y (2025+) Performance': "Model Y (2025+) Performance",
+    'Model Y L': "Model Y L",
+  },
+  zh: {
+    title: "特斯拉贴膜编辑器",
+    vehicleModel: "车型选择",
+    styleTrim: "款式 / 配置",
+    autoMask: "自动遮罩",
+    selectAll: "全选区域",
+    clearMask: "清除遮罩",
+    templates: "预设模版",
+    designTools: "设计工具",
+    select: "选择区域",
+    fillColor: "填充颜色",
+    solidColor: "纯色填充",
+    useGradient: "使用渐变",
+    gradientTip: "提示：在车身上拖动以设置渐变方向！",
+    start: "起始色",
+    end: "结束色",
+    uploadSticker: "上传贴纸",
+    aiGeneration: "AI 生成纹理",
+    aiPlaceholder: "描述你想要的纹理或图案...",
+    dreaming: "生成中...",
+    generateTexture: "生成纹理",
+    resetAll: "重置所有",
+    exportDesign: "导出设计图",
+    alertTemplateNotLoaded: "模版未加载！",
+    alertRegionMasked: "区域已遮罩！现在你可以上传贴纸到该区域。",
+    alertAiApplied: "AI 纹理已应用到选中区域！",
+    alertNetworkError: "网络响应异常",
+    alertAiFailed: "AI 生成失败。",
+    alertNetworkBlocked: "网络请求被拦截，已生成本地图案代替。",
+    // Vehicle Names
+    'Cybertruck': "Cybertruck (赛博皮卡)",
+    'Model 3': "Model 3",
+    'Model 3 (2024+) Standard & Premium': "Model 3 (2024+) 标准/长续航",
+    'Model 3 (2024+) Performance': "Model 3 (2024+) 高性能版",
+    'Model Y': "Model Y",
+    'Model Y (2025+) Standard': "Model Y (2025+) 标准版",
+    'Model Y (2025+) Premium': "Model Y (2025+) 长续航版",
+    'Model Y (2025+) Performance': "Model Y (2025+) 高性能版",
+    'Model Y L': "Model Y 加长版",
+  }
+};
 
 const VEHICLE_GROUPS = [
   { 
@@ -44,6 +128,10 @@ export default function Editor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [canvas, setCanvas] = useState<fabric.Canvas | null>(null);
   
+  // Language State
+  const [lang, setLang] = useState<'en' | 'zh'>('en');
+  const t = TRANSLATIONS[lang];
+
   // Model Selection State
   const [selectedGroup, setSelectedGroup] = useState(VEHICLE_GROUPS[0]);
   const [selectedModel, setSelectedModel] = useState(VEHICLE_GROUPS[0].variants[0].id); // This is the folder ID
@@ -482,7 +570,7 @@ export default function Editor() {
         // 1. Get Template for Detection
         const templateImg = canvas.overlayImage as fabric.FabricImage;
         if (!templateImg) {
-            alert("Template not loaded!");
+            alert(t.alertTemplateNotLoaded);
             return;
         }
 
@@ -904,16 +992,24 @@ export default function Editor() {
     <div className="flex h-screen bg-gray-100 font-sans">
       {/* Sidebar */}
       <div className="w-80 bg-white shadow-xl flex flex-col border-r border-gray-200 z-10">
-        <div className="p-6 border-b border-gray-100">
+        <div className="p-6 border-b border-gray-100 flex justify-between items-center">
            <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-             Tesla Wrap Editor
+             {t.title}
            </h1>
+           <button 
+             onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}
+             className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-600"
+             title="Switch Language"
+           >
+             <Globe size={20} />
+             <span className="text-[10px] font-bold block text-center">{lang === 'en' ? 'CN' : 'EN'}</span>
+           </button>
         </div>
         
         <div className="flex-1 overflow-y-auto p-6 space-y-8">
             {/* Model Selection */}
             <section>
-              <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Vehicle Model</h2>
+              <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">{t.vehicleModel}</h2>
               
               {/* Group Selection */}
               <div className="grid grid-cols-3 gap-2 mb-2">
@@ -930,7 +1026,7 @@ export default function Editor() {
                         : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                     }`}
                   >
-                    {group.name}
+                    {(t as any)[group.name] || group.name}
                   </button>
                 ))}
               </div>
@@ -938,7 +1034,7 @@ export default function Editor() {
               {/* Variant Selection (if multiple) */}
               {selectedGroup.variants.length > 1 && (
                   <div className="mb-4">
-                      <label className="text-[10px] text-gray-400 font-medium mb-1 block">Style / Trim</label>
+                      <label className="text-[10px] text-gray-400 font-medium mb-1 block">{t.styleTrim}</label>
                       <div className="relative">
                           <select 
                             value={selectedModel}
@@ -946,7 +1042,7 @@ export default function Editor() {
                             className="w-full p-2 text-xs border border-gray-200 rounded-lg appearance-none bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
                               {selectedGroup.variants.map(v => (
-                                  <option key={v.id} value={v.id}>{v.name}</option>
+                                  <option key={v.id} value={v.id}>{(t as any)[v.name] || v.name}</option>
                               ))}
                           </select>
                           <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
@@ -963,14 +1059,14 @@ export default function Editor() {
                   }`}
                 >
                   <Wand size={20} className="mb-1" />
-                  <span className="text-xs">Auto Mask</span>
+                  <span className="text-xs">{t.autoMask}</span>
                 </button>
                 <button
                   onClick={handleAutoSelectAll}
                   className="flex flex-col items-center justify-center p-3 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 bg-white"
                 >
                   <Layers size={20} className="mb-1" />
-                  <span className="text-xs">Select All</span>
+                  <span className="text-xs">{t.selectAll}</span>
                 </button>
                 {currentMask && (
                     <button 
@@ -987,7 +1083,7 @@ export default function Editor() {
                         className="flex flex-col items-center justify-center p-3 rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
                     >
                         <Eraser size={20} className="mb-1" />
-                        <span className="text-xs">Clear Mask</span>
+                        <span className="text-xs">{t.clearMask}</span>
                     </button>
                 )}
               </div>
@@ -996,7 +1092,7 @@ export default function Editor() {
             {/* Presets */}
             <section>
                <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex justify-between items-center">
-                  <span>Templates</span>
+                  <span>{t.templates}</span>
                   <span className="text-[10px] bg-gray-100 px-2 py-0.5 rounded-full text-gray-500">{presets.length}</span>
                </h2>
                <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
@@ -1021,7 +1117,7 @@ export default function Editor() {
 
             {/* Tools */}
             <section>
-              <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Design Tools</h2>
+              <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">{t.designTools}</h2>
               <div className="grid grid-cols-3 gap-2 mb-4">
                 <button
                   onClick={() => setIsDrawing(false)}
@@ -1030,7 +1126,7 @@ export default function Editor() {
                   }`}
                 >
                   <MousePointer2 size={20} className="mb-1" />
-                  <span className="text-xs">Select</span>
+                  <span className="text-xs">{t.select}</span>
                 </button>
                 <button
                   onClick={() => setIsDrawing(true)}
@@ -1039,7 +1135,7 @@ export default function Editor() {
                   }`}
                 >
                   <PaintBucket size={20} className="mb-1" />
-                  <span className="text-xs">Fill Color</span>
+                  <span className="text-xs">{t.fillColor}</span>
                 </button>
               </div>
               
@@ -1057,7 +1153,7 @@ export default function Editor() {
                         }}
                         className="flex-1 h-8 opacity-0 absolute w-32 cursor-pointer"
                       />
-                      <span className="text-xs text-gray-500">Solid Color</span>
+                      <span className="text-xs text-gray-500">{t.solidColor}</span>
                    </div>
 
                    {/* Gradient Toggle */}
@@ -1069,17 +1165,17 @@ export default function Editor() {
                             onChange={(e) => setUseGradient(e.target.checked)}
                             className="rounded text-blue-600"
                         />
-                        <label htmlFor="useGradient" className="text-xs font-medium text-gray-700">Use Gradient</label>
+                        <label htmlFor="useGradient" className="text-xs font-medium text-gray-700">{t.useGradient}</label>
                    </div>
 
                    {/* Gradient Picker */}
                    {useGradient && (
                        <div className="space-y-2">
                            <div className="p-2 bg-blue-50 rounded text-[10px] text-blue-700 leading-tight">
-                               Tip: Drag on the car to set gradient direction!
+                               {t.gradientTip}
                            </div>
                            <div className="flex items-center gap-2">
-                                <span className="text-[10px] text-gray-500 w-8">Start</span>
+                                <span className="text-[10px] text-gray-500 w-8">{t.start}</span>
                                 <input 
                                     type="color" 
                                     value={gradientColor1} 
@@ -1088,7 +1184,7 @@ export default function Editor() {
                                 />
                            </div>
                            <div className="flex items-center gap-2">
-                                <span className="text-[10px] text-gray-500 w-8">End</span>
+                                <span className="text-[10px] text-gray-500 w-8">{t.end}</span>
                                 <input 
                                     type="color" 
                                     value={gradientColor2} 
@@ -1103,7 +1199,7 @@ export default function Editor() {
 
                <label className="flex items-center justify-center gap-2 w-full p-3 rounded-lg border border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50 cursor-pointer transition-all group">
                   <ImageIcon size={18} className="text-gray-400 group-hover:text-blue-500" />
-                  <span className="text-sm text-gray-600 group-hover:text-blue-600">Upload Sticker</span>
+                  <span className="text-sm text-gray-600 group-hover:text-blue-600">{t.uploadSticker}</span>
                   <input type="file" accept="image/*" className="hidden" onChange={handleAddImage} />
                </label>
             </section>
@@ -1111,11 +1207,11 @@ export default function Editor() {
             {/* AI */}
             <section>
               <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                 <Wand2 size={12} /> AI Generation
+                 <Wand2 size={12} /> {t.aiGeneration}
               </h2>
               <div className="space-y-2">
                 <textarea
-                    placeholder="Describe a texture or pattern..."
+                    placeholder={t.aiPlaceholder}
                     className="w-full p-3 text-sm border border-gray-200 rounded-lg h-20 resize-none focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all"
                     value={aiPrompt}
                     onChange={(e) => setAiPrompt(e.target.value)}
@@ -1125,7 +1221,7 @@ export default function Editor() {
                     disabled={isAiGenerating || !aiPrompt}
                     className="w-full py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg text-sm font-medium shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
-                    {isAiGenerating ? 'Dreaming...' : 'Generate Texture'}
+                    {isAiGenerating ? t.dreaming : t.generateTexture}
                 </button>
               </div>
             </section>
@@ -1156,13 +1252,13 @@ export default function Editor() {
                 }}
                 className="w-full py-2 text-red-600 text-sm hover:bg-red-50 rounded-lg transition-colors flex items-center justify-center gap-2"
             >
-                <Eraser size={16} /> Reset All
+                <Eraser size={16} /> {t.resetAll}
             </button>
             <button
                 onClick={handleExport}
                 className="w-full py-3 bg-gray-900 text-white rounded-lg text-sm font-bold shadow-lg hover:bg-black transition-all flex items-center justify-center gap-2"
             >
-                <Download size={18} /> Export Design
+                <Download size={18} /> {t.exportDesign}
             </button>
         </div>
       </div>
