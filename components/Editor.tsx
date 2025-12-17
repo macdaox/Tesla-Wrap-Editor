@@ -366,9 +366,9 @@ export default function Editor() {
        } else {
            // Default: Full Wrap (Background)
            
-           // Clear existing design layer (images that are not the overlay)
+           // Clear existing design layer (images that are not the overlay/mask)
            canvas.getObjects().forEach(obj => {
-               if ((obj as any) !== canvas.overlayImage) {
+               if ((obj as any) !== canvas.overlayImage && (obj as any).name !== 'background_mask') {
                    canvas.remove(obj);
                }
            });
@@ -379,78 +379,17 @@ export default function Editor() {
                originX: 'left',
                originY: 'top',
                selectable: true,
-               evented: false,
+               evented: true, // Allow user to move it
            });
            
-                   // AUTO-MASK: Segment and Fill All Regions
-                    const templateImg = canvas.overlayImage as fabric.FabricImage;
-                    if (templateImg) {
-                        const offCanvas = document.createElement('canvas');
-                        offCanvas.width = 1024;
-                        offCanvas.height = 1024;
-                        const offCtx = offCanvas.getContext('2d');
-                        if (offCtx) {
-                            offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
-                            
-                            // 1. Detect all valid car regions (excluding background)
-                            const regions = detectAllRegions(offCtx, 1024, 1024);
-                            
-                            if (regions.length > 0) {
-                                // 2. Create Pattern from the image
-                                const patternSource = img.getElement() as HTMLImageElement;
-                                
-                                // 3. Create a Polygon for each region and fill with pattern
-                                regions.forEach(points => {
-                                    // Create a new pattern instance for each polygon to ensure correct offset
-                                    // We need to offset the pattern so it looks continuous across polygons
-                                    // pattern.offsetX/Y should be relative to the polygon's position?
-                                    // Fabric pattern coords are relative to the object's top-left.
-                                    // To make the pattern align with the Canvas (0,0), we need:
-                                    // patternOffsetX = -polygon.left
-                                    // patternOffsetY = -polygon.top
-                                    
-                                    // We need to calculate the bounding box of the points to know polygon.left/top
-                                    const xs = points.map(p => p.x);
-                                    const ys = points.map(p => p.y);
-                                    const minX = Math.min(...xs);
-                                    const minY = Math.min(...ys);
-                                    
-                                    const pattern = new fabric.Pattern({
-                                        source: patternSource,
-                                        repeat: 'repeat',
-                                        patternTransform: [1, 0, 0, 1, -minX, -minY] // Offset pattern to align with canvas origin
-                                    });
-                                    
-                                    const polygon = new fabric.Polygon(points, {
-                                        fill: pattern,
-                                        stroke: 'transparent',
-                                        selectable: true,
-                                        evented: true,
-                                        objectCaching: false,
-                                    });
-                                    
-                                    canvas.add(polygon);
-                                    canvas.sendObjectToBack(polygon);
-                                });
-                                
-                                canvas.requestRenderAll();
-                                // alert(`Auto-wrapped ${regions.length} parts! You can select and delete unwanted parts (like windows).`);
-                            } else {
-                                // Fallback if detection fails
-                                canvas.add(img);
-                                canvas.sendObjectToBack(img);
-                                canvas.requestRenderAll();
-                            }
-                        } else {
-                            canvas.add(img);
-                            canvas.sendObjectToBack(img);
-                            canvas.requestRenderAll();
-                        }
-                    } else {
-                        canvas.add(img);
-                        canvas.sendObjectToBack(img);
-                        canvas.requestRenderAll();
-                    }
+           canvas.add(img);
+           canvas.sendObjectToBack(img); // Send to bottom (below mask)
+           
+           // Ensure Mask is on top
+           const mask = canvas.getObjects().find(o => (o as any).name === 'background_mask');
+           if (mask) canvas.bringObjectToFront(mask);
+           
+           canvas.requestRenderAll();
        }
     });
   };
@@ -753,17 +692,8 @@ export default function Editor() {
              });
              
              canvas.requestRenderAll();
-        } else if (currentMask) {
-            // Deprecated path? If we have a currentMask (from old Auto Mask logic)
-            currentMask.clone().then((clonedMask: fabric.Polygon) => {
-                clonedMask.absolutePositioned = true;
-                img.clipPath = clonedMask;
-                canvas.add(img);
-                canvas.centerObject(img);
-                canvas.setActiveObject(img);
-            });
         } else {
-             // NO SELECTION: Default to "Full Wrap" behavior (Auto-Segment)
+             // NO SELECTION: Default to "Full Wrap" behavior
              
              // 1. Center the image initially just in case detection fails
              img.scaleToWidth(1024); // Full width
@@ -771,67 +701,17 @@ export default function Editor() {
                  left: 0,
                  top: 0,
                  selectable: true,
-                 evented: false,
+                 evented: true,
              });
 
-             // 2. Attempt Auto-Segment
-             const templateImg = canvas.overlayImage as fabric.FabricImage;
-             if (templateImg) {
-                 const offCanvas = document.createElement('canvas');
-                 offCanvas.width = 1024;
-                 offCanvas.height = 1024;
-                 const offCtx = offCanvas.getContext('2d');
-                 if (offCtx) {
-                     offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
-                     
-                     // Detect regions
-                     const regions = detectAllRegions(offCtx, 1024, 1024);
-                     
-                     if (regions.length > 0) {
-                         const patternSource = img.getElement() as HTMLImageElement;
-                         
-                         const polygons = regions.map(points => {
-                             const xs = points.map(p => p.x);
-                             const ys = points.map(p => p.y);
-                             const minX = Math.min(...xs);
-                             const minY = Math.min(...ys);
-                             
-                             const pattern = new fabric.Pattern({
-                                 source: patternSource,
-                                 repeat: 'repeat',
-                                 patternTransform: [1, 0, 0, 1, -minX, -minY]
-                             });
-                             
-                             return new fabric.Polygon(points, {
-                                 fill: pattern,
-                                 stroke: 'transparent',
-                                 selectable: true,
-                                 evented: true,
-                                 objectCaching: false,
-                             });
-                         });
-                         
-                         canvas.add(...polygons);
-                         polygons.forEach(p => canvas.sendObjectToBack(p));
-                         canvas.requestRenderAll();
-                     } else {
-                         // Fallback: Just add the image (user will see it spills)
-                         // Or alert them
-                         alert("Could not auto-detect regions. Added image to canvas.");
-                         canvas.add(img);
-                         canvas.sendObjectToBack(img);
-                         canvas.requestRenderAll();
-                     }
-                 } else {
-                     canvas.add(img);
-                     canvas.sendObjectToBack(img);
-                     canvas.requestRenderAll();
-                 }
-             } else {
-                 canvas.add(img);
-                 canvas.sendObjectToBack(img);
-                 canvas.requestRenderAll();
-             }
+             canvas.add(img);
+             canvas.sendObjectToBack(img);
+             
+             // Ensure Mask is on top
+             const mask = canvas.getObjects().find(o => (o as any).name === 'background_mask');
+             if (mask) canvas.bringObjectToFront(mask);
+             
+             canvas.requestRenderAll();
         }
       });
     };
@@ -892,69 +772,23 @@ export default function Editor() {
                          originX: 'left',
                          originY: 'top',
                          selectable: true,
-                         evented: false,
+                         evented: true,
                      });
                      
                      // Clear existing design layer (but keep overlay)
                      canvas.getObjects().forEach(obj => {
-                         if ((obj as any) !== canvas.overlayImage) {
+                         if ((obj as any) !== canvas.overlayImage && (obj as any).name !== 'background_mask') {
                              canvas.remove(obj);
                          }
                      });
                      
-                     // AUTO-MASK: Segment and Fill All Regions
-                      const templateImg = canvas.overlayImage as fabric.FabricImage;
-                      if (templateImg) {
-                          const offCanvas = document.createElement('canvas');
-                          offCanvas.width = 1024;
-                          offCanvas.height = 1024;
-                          const offCtx = offCanvas.getContext('2d');
-                          if (offCtx) {
-                              offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
-                              
-                              // 1. Detect all valid car regions (excluding background)
-                              const regions = detectAllRegions(offCtx, 1024, 1024);
-                              
-                              if (regions.length > 0) {
-                                // 2. Create Pattern from the image
-                                const patternSource = img.getElement() as HTMLImageElement;
-                                
-                                // 3. Create a Polygon for each region and fill with pattern
-                                const polygons = regions.map(points => {
-                                    const xs = points.map(p => p.x);
-                                    const ys = points.map(p => p.y);
-                                    const minX = Math.min(...xs);
-                                    const minY = Math.min(...ys);
-                                    
-                                    const pattern = new fabric.Pattern({
-                                        source: patternSource,
-                                        repeat: 'repeat',
-                                        patternTransform: [1, 0, 0, 1, -minX, -minY]
-                                    });
-                                    
-                                    return new fabric.Polygon(points, {
-                                        fill: pattern,
-                                        stroke: 'transparent',
-                                        selectable: true,
-                                        evented: true,
-                                        objectCaching: false,
-                                    });
-                                });
-                                
-                                canvas.add(...polygons);
-                                polygons.forEach(p => canvas.sendObjectToBack(p));
-                                canvas.requestRenderAll();
-                            } else {
-                                // Fallback if detection fails - Alert user instead of spilling
-                                alert("Could not auto-detect car parts. Please use 'Select All' or Magic Wand to select parts first.");
-                                // Do not add image to canvas background
-                            }
-                        } else {
-                            alert("Could not process template image.");
-                        }
-                    } else {
-                        alert("Template not loaded.");
-                    }
+                     canvas.add(img);
+                     canvas.sendObjectToBack(img);
+                     
+                     const mask = canvas.getObjects().find(o => (o as any).name === 'background_mask');
+                     if (mask) canvas.bringObjectToFront(mask);
+                     
+                     canvas.requestRenderAll();
                      
                      // alert("AI Texture applied as full wrap. (Tip: Select a part first to apply only there!)");
                  }
