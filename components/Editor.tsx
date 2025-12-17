@@ -390,55 +390,11 @@ export default function Editor() {
         });
         canvas.add(polygon);
         
-        // Ensure the polygon is behind the template overlay (which is usually on top but not an object in collection if overlayImage property is used)
-        // Actually, fabric's overlayImage property is ALWAYS rendered on top of everything.
-        // If the black lines/windows are part of the overlayImage, they should be visible ON TOP of this polygon.
-        // However, if the template has transparent areas for paint but opaque areas for windows, the polygon is behind.
-        // Wait, if the user says "it's covered", maybe the polygon is somehow on top?
-        // Ah, if we are using `canvas.overlayImage`, it draws on top.
-        // But if the template image has white background that we are multiplying, maybe the window area is not transparent?
-        // If the window area in the template is BLACK, multiply mode (on overlay) over RED polygon:
-        // Black * Red = Black. So windows should be black.
-        // White * Red = Red. So body should be red.
-        // Transparent * Red = Red? No, multiply with transparent is tricky.
-        
-        // Let's check how we loaded the template:
-        // img.globalCompositeOperation = 'multiply';
-        // canvas.overlayImage = img;
-        
-        // If the window is black in the template, it should stay black.
-        // BUT if the polygon is added, it's in the main object stack.
-        // The overlay is drawn AFTER the main stack.
-        // So: 1. Background (none) -> 2. Polygon (Red) -> 3. Overlay (Template, Multiply)
-        // Result: Red polygon is drawn. Then Template is drawn on top with Multiply.
-        // If Template has White pixels: Red * White = Red. (Correct)
-        // If Template has Black pixels (Window): Red * Black = Black. (Correct, window should be black)
-        
-        // ISSUE: If the user says "I painted the window", it means the detection included the window area.
-        // My previous fix "dark_barrier_check" prevents painting INTO the window.
-        // But if the user says "there is color ON it", maybe they mean the stroke is bleeding?
-        // OR, maybe the template isn't a perfect multiply overlay?
-        
-        // Re-reading user: "I painted a black place (window) and there is color on it".
-        // This implies the previous fix (dark barrier) FAILED to stop the flood fill from entering the window,
-        // OR the flood fill went around it?
-        // Wait, if I just implemented dark_barrier_check, maybe they haven't tested it yet?
-        // "I painted the black place is a window, still have color on it" -> implies they see color covering the window.
-        
-        // If the polygon COVERS the window, it means the polygon geometry includes the window points.
-        // This means `detectRegion` included the window pixels.
-        // So the `dark_barrier_check` is the primary fix.
-        
-        // BUT, there is another possibility:
-        // The Stroke (3px) might be encroaching onto the black lines/window edges.
-        // And if the overlay is drawn *before* the objects? No, overlay is always last.
-        
-        // Let's ensure the polygon is sent to back just in case we have other layers.
+        // Ensure the polygon is behind the template overlay
         canvas.sendObjectToBack(polygon);
         
-        // If we have a "background image" (like a texture preset), we want the color to be on top of it?
-        // Or maybe mix?
-        // For now, sending to back is safe for the "paint" concept.
+        // AUTO-SELECT the new region so AI tools know what to target
+        canvas.setActiveObject(polygon);
         
         canvas.requestRenderAll();
     };
@@ -593,28 +549,131 @@ export default function Editor() {
   
   const handleAiGenerate = async () => {
      if (!canvas || !aiPrompt) return;
+     
+     // 1. CAPTURE SELECTION SYNCHRONOUSLY BEFORE ASYNC CALL
+     // If we wait until the fetch is done, the user might have clicked elsewhere or the selection might be lost.
+     const activeObject = canvas.getActiveObject();
+     
      setIsAiGenerating(true);
      
-     setTimeout(() => {
-        // Try to pick a random preset if available, or generate a rect
-        if (presets.length > 0 && Math.random() > 0.5) {
-            const randomPreset = presets[Math.floor(Math.random() * presets.length)];
-            handleApplyPreset(randomPreset);
-            alert(`AI generated a style based on '${aiPrompt}' (using preset ${randomPreset})`);
-        } else {
-             // Random pattern
-            const rect = new fabric.Rect({
-                width: 300, height: 300,
-                fill: '#' + Math.floor(Math.random()*16777215).toString(16),
-                left: 200, top: 200
-            });
-             canvas.add(rect);
-             canvas.setActiveObject(rect);
-             alert('AI generated a color patch.');
-        }
-        setIsAiGenerating(false);
-        setAiPrompt('');
-     }, 1500);
+     try {
+         // Use the direct API endpoint which is more robust
+         const encodedPrompt = encodeURIComponent(aiPrompt + ", seamless texture, pattern, high quality, 4k, wallpaper, abstract, automotive wrap design");
+         const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true&seed=${Math.floor(Math.random() * 10000)}`;
+
+         fetch(imageUrl).then(res => {
+             if (!res.ok) throw new Error("Network response was not ok");
+             return res.blob();
+         }).then(blob => {
+             const objectURL = URL.createObjectURL(blob);
+             
+             fabric.FabricImage.fromURL(objectURL).then(img => {
+                 if (!img) {
+                     throw new Error("Failed to load generated image");
+                 }
+                 
+                 // Scale to fit or cover
+                 img.scaleToWidth(1024);
+                 
+                 // USE CAPTURED SELECTION
+                 if (activeObject && activeObject.type === 'polygon') {
+                     // Apply as PATTERN to the selected region
+                     const pattern = new fabric.Pattern({
+                         source: img.getElement() as HTMLImageElement,
+                         repeat: 'repeat',
+                     });
+                     
+                     (activeObject as fabric.Polygon).set({
+                         fill: pattern,
+                         stroke: 'transparent', 
+                     });
+                     
+                     canvas.requestRenderAll();
+                     alert("AI Texture applied to your selection!");
+                     
+                 } else {
+                     // No selection -> Fallback to Full Canvas Wrap (Background)
+                     
+                     img.set({
+                         left: 0,
+                         top: 0,
+                         originX: 'left',
+                         originY: 'top',
+                         selectable: true,
+                         evented: false,
+                     });
+                     
+                     // Clear existing design layer (but keep overlay)
+                     canvas.getObjects().forEach(obj => {
+                         if ((obj as any) !== canvas.overlayImage) {
+                             canvas.remove(obj);
+                         }
+                     });
+                     
+                     canvas.add(img);
+                     canvas.sendObjectToBack(img);
+                     canvas.requestRenderAll();
+                     
+                     // alert("AI Texture applied as full wrap. (Tip: Select a part first to apply only there!)");
+                 }
+                 
+                 setIsAiGenerating(false);
+                 setAiPrompt('');
+             });
+         }).catch(err => {
+             console.error("AI Network Error, falling back to local generation:", err);
+             // FALLBACK: Generate a local abstract pattern if network fails (e.g. adblock)
+             
+             // Create a temporary canvas to draw a pattern
+             const tempCanvas = document.createElement('canvas');
+             tempCanvas.width = 1024;
+             tempCanvas.height = 1024;
+             const ctx = tempCanvas.getContext('2d');
+             if (ctx) {
+                 // Generate a cool gradient based on prompt length (pseudo-random)
+                 const hue = (aiPrompt.length * 37) % 360;
+                 const gradient = ctx.createLinearGradient(0, 0, 1024, 1024);
+                 gradient.addColorStop(0, `hsl(${hue}, 70%, 20%)`);
+                 gradient.addColorStop(0.5, `hsl(${(hue + 60) % 360}, 80%, 50%)`);
+                 gradient.addColorStop(1, `hsl(${(hue + 120) % 360}, 70%, 20%)`);
+                 ctx.fillStyle = gradient;
+                 ctx.fillRect(0, 0, 1024, 1024);
+                 
+                 // Add some "cyber" lines
+                 ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+                 ctx.lineWidth = 2;
+                 for(let i=0; i<50; i++) {
+                     ctx.beginPath();
+                     ctx.moveTo(Math.random() * 1024, Math.random() * 1024);
+                     ctx.lineTo(Math.random() * 1024, Math.random() * 1024);
+                     ctx.stroke();
+                 }
+                 
+                 const dataURL = tempCanvas.toDataURL('image/png');
+                 fabric.FabricImage.fromURL(dataURL).then(img => {
+                    img.scaleToWidth(1024);
+                    img.set({ left: 0, top: 0, selectable: true, evented: false });
+                    
+                    canvas.getObjects().forEach(obj => {
+                        if ((obj as any) !== canvas.overlayImage) canvas.remove(obj);
+                    });
+                    
+                    canvas.add(img);
+                    canvas.sendObjectToBack(img);
+                    canvas.requestRenderAll();
+                 });
+                 
+                 alert("Network blocked AI request. Generated a local pattern instead.");
+             }
+             
+             setIsAiGenerating(false);
+         });
+         
+     } catch (error) {
+         console.error(error);
+         setIsAiGenerating(false);
+         alert("AI generation failed.");
+     }
   };
 
   return (
