@@ -1067,7 +1067,7 @@ export default function Editor() {
                           <select 
                             value={selectedModel}
                             onChange={(e) => setSelectedModel(e.target.value)}
-                            className="w-full p-2 text-xs border border-gray-200 rounded-lg appearance-none bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="w-full p-2 text-xs border border-gray-200 rounded-lg appearance-none bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 font-medium"
                           >
                               {selectedGroup.variants.map(v => (
                                   <option key={v.id} value={v.id}>{(t as any)[v.name] || v.name}</option>
