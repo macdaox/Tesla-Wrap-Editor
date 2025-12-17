@@ -8,7 +8,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as fabric from 'fabric';
 import { Download, Eraser, Image as ImageIcon, MousePointer2, Wand2, Wand, PaintBucket, ChevronDown, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
-import { detectRegion } from '@/utils/image-processing';
+import { detectRegion, createBackgroundMask } from '@/utils/image-processing';
 
 const VEHICLE_GROUPS = [
   { 
@@ -197,51 +197,184 @@ export default function Editor() {
 
   }, [canvas, selectedModel]);
 
+  // Helper: Auto-detect car body mask (inverted background)
+  const getCarBodyMask = (canvasWidth: number, canvasHeight: number, templateImg: fabric.FabricImage): Promise<fabric.Polygon | null> => {
+      return new Promise((resolve) => {
+          const offCanvas = document.createElement('canvas');
+          offCanvas.width = canvasWidth;
+          offCanvas.height = canvasHeight;
+          const offCtx = offCanvas.getContext('2d');
+          if (!offCtx) { resolve(null); return; }
+
+          const originalElement = templateImg.getElement();
+          offCtx.drawImage(originalElement, 0, 0, canvasWidth, canvasHeight);
+
+          // Use detectRegion on (0,0) to find the background
+          // Note: detectRegion returns the boundary of the flooded area.
+          // Since we are flooding the *outside*, the "boundary" is essentially the outline of the car + canvas borders.
+          // However, detectRegion usually returns the "shape" of the color we clicked.
+          // If we click white background, we get a polygon of the background.
+          // We want the INVERSE of that.
+          // Actually, if we have the background polygon, we can use it to "punch out" from a full rectangle?
+          // Fabric.js clipPath supports complex shapes but "inversion" is tricky without composite operations.
+          // A simpler hack: The `detectRegion` logic traces the contour.
+          // If we click the background, we get the contour of the background.
+          // The "hole" in the background is the car.
+          // `detectRegion` (as implemented in `image-processing.ts`) usually returns the *outermost* boundary of the flooded pixels.
+          // If the background surrounds the car, the "boundary" will be the canvas edges + the car outline.
+          // If we simply use this as a mask, we mask *in* the background.
+          // We want to mask *out* the background.
+          // Fabric.js `clipPath` with `inverted: true`? Fabric doesn't support `inverted` easily on clipPath.
+          
+          // ALTERNATIVE: Detect the *car body* directly?
+          // The car body is usually White (same as background).
+          // But it's separated by black lines.
+          // If we just want to avoid the "outside", we can try to flood fill the outside and turn it Transparent?
+          // No, we need a vector path for Fabric.
+          
+          // Let's try a different approach for "Full Wrap":
+          // If the user wants "Full Wrap", we can assume they want it everywhere *except* the background.
+          // But if background and car are same color, we can't distinguish without the lines.
+          // The lines form a closed loop (mostly).
+          
+          // Given the constraints and the user's specific request ("under the car frame"),
+          // maybe the "frame" IS the white background?
+          // If I cannot easily invert the vector, maybe I can find a point *inside* the car?
+          // Center of canvas? (512, 512).
+          // For Model 3/Y/Cybertruck, (512, 512) is usually the roof/windshield.
+          // If we flood fill from (512, 512), do we get the whole car?
+          // Usually the car is segmented by lines (hood, roof, trunk).
+          // So flood filling from center only gets the roof.
+          
+          // Okay, let's look at `detectRegion`.
+          // If I can't perfect this without a proper vector mask, I should stick to the "Selection" workflow which works 100%.
+          // But the user insists on "One-time fill" (Full Wrap).
+          // I will try to implement a "best effort" mask by:
+          // 1. Assuming the car is roughly in the center.
+          // 2. Or, just provide a "clipping" mask that is slightly smaller than canvas? No.
+          
+          // Actually, if I look at the "Zootopia" screenshot, the user successfully applied it to specific parts (the ears/face are cut).
+          // Oh, wait. The user's screenshot (the one with "Zootopia") shows the image *masked* to the door/fender.
+          // The user said "should be like this picture" (referring to the grey car example where image is ONLY on car).
+          
+          // I will add a heuristic:
+          // If "Full Wrap" is requested, we simply warn the user or try to apply it to "All Detectable Regions"?
+          // That's computationally expensive (scanning every pixel).
+          
+          // Let's stick to the robust solution:
+          // I will modify `handleApplyPreset` to:
+          // If no selection:
+          // 1. Alert the user: "Please select a part to apply the wrap to, or it will be applied as a background."
+          // 2. OR, iterate through pre-defined points? We don't have them.
+          
+          // Wait, the user said "Automatic" (自动).
+          // I will try to use the `detectRegion` on the center point (512, 512) as a guess?
+          // If it returns a valid polygon, apply to that?
+          // Better: I will stick to the previous fix (Apply to Selection) but make the "No Selection" case clearer.
+          // If the user wants "Full Body", they effectively need to select the "Full Body".
+          // Since we don't have a "Select All Parts" button...
+          // Maybe I can add a "Select All Car Parts" button?
+          // That requires knowing where they are.
+          
+          // Let's go with the "Inverted Background" idea. It's the most promising for "Auto Mask".
+          // We detect the background (0,0).
+          // We get a polygon that represents the background.
+          // We make a giant rectangle (canvas size) and SUBTRACT the background polygon?
+          // Fabric doesn't do boolean operations natively and robustly.
+          
+          // Let's try `globalCompositeOperation` on the Image itself?
+          // If we use `destination-in` with the car shape?
+          // We don't have the car shape.
+          
+          // Okay, simplest fix for "Full Wrap spilling":
+          // We can't easily fix it without a mask.
+          // I will add a notification when applying full wrap.
+          resolve(null);
+      });
+  };
+
   // Apply Preset (Overlay Image)
   const handleApplyPreset = (filename: string) => {
     if (!canvas) return;
     const url = `/assets/${selectedModel}/example/${filename}`;
     
-    // Clear existing design layer (images that are not the overlay)
-    // We want to keep the "Template Wireframe" (overlayImage) but replace the design.
-    // The design should be an image object added to the canvas, but sent to back?
-    // Actually, Fabric's overlayImage is always on top.
-    // So we just need to add the preset image and center/scale it.
-    
-    // Remove previous preset/design if any? 
-    // Let's assume user wants to replace current design.
-    // We can clear all objects that are not the overlay (which is separate property).
-    canvas.clear(); 
-    // Note: canvas.clear() removes all objects but keeps background/overlay properties if set?
-    // Fabric 6: clear() removes objects. Background/Overlay are properties.
-    // BUT we want to ensure we don't pile up images.
+    // Check if user has a selection (Polygon)
+    const activeObject = canvas.getActiveObject();
     
     fabric.FabricImage.fromURL(url).then(img => {
-       // The preset images in `example` folders are likely pre-masked or full-vehicle wraps.
-       // They should match the template dimensions.
-       
-       // Calculate scale to fit canvas (1024x1024)
-       // The templates are usually same aspect ratio.
+       // Scale to fit canvas (1024x1024)
        const scale = 1024 / img.width!;
        img.scale(scale);
        
-       img.set({
-           left: 0,
-           top: 0,
-           originX: 'left',
-           originY: 'top',
-           selectable: true, // Allow user to move it if needed, or lock it? Let's lock for now.
-           evented: false,
-       });
-       
-       // Add to canvas
-       canvas.add(img);
-       
-       // Send to back so it's behind any future stickers/drawings?
-       // Actually, this is the "base wrap", so it should be at the bottom.
-       canvas.sendObjectToBack(img);
-       
-       canvas.requestRenderAll();
+       if (activeObject && activeObject.type === 'polygon') {
+           // Apply as PATTERN to the selected region
+           const pattern = new fabric.Pattern({
+               source: img.getElement() as HTMLImageElement,
+               repeat: 'repeat',
+           });
+           
+           (activeObject as fabric.Polygon).set({
+               fill: pattern,
+               stroke: 'transparent', 
+           });
+           
+           canvas.requestRenderAll();
+       } else {
+           // Default: Full Wrap (Background)
+           
+           // Clear existing design layer (images that are not the overlay)
+           canvas.getObjects().forEach(obj => {
+               if ((obj as any) !== canvas.overlayImage) {
+                   canvas.remove(obj);
+               }
+           });
+           
+           img.set({
+               left: 0,
+               top: 0,
+               originX: 'left',
+               originY: 'top',
+               selectable: true,
+               evented: false,
+           });
+           
+           // AUTO-MASK: Clip to Car Body
+           // Create a mask from the template to hide the background
+           const templateImg = canvas.overlayImage as fabric.FabricImage;
+           if (templateImg) {
+               const offCanvas = document.createElement('canvas');
+               offCanvas.width = 1024;
+               offCanvas.height = 1024;
+               const offCtx = offCanvas.getContext('2d');
+               if (offCtx) {
+                   offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
+                   const maskDataURL = createBackgroundMask(offCtx, 1024, 1024);
+                   
+                   fabric.FabricImage.fromURL(maskDataURL).then(maskImg => {
+                       maskImg.absolutePositioned = true;
+                       maskImg.left = 0;
+                       maskImg.top = 0;
+                       maskImg.originX = 'left';
+                       maskImg.originY = 'top';
+                       
+                       img.clipPath = maskImg;
+                       
+                       canvas.add(img);
+                       canvas.sendObjectToBack(img);
+                       canvas.requestRenderAll();
+                   });
+               } else {
+                   // Fallback without mask
+                   canvas.add(img);
+                   canvas.sendObjectToBack(img);
+                   canvas.requestRenderAll();
+               }
+           } else {
+               canvas.add(img);
+               canvas.sendObjectToBack(img);
+               canvas.requestRenderAll();
+           }
+       }
     });
   };
 
@@ -610,9 +743,40 @@ export default function Editor() {
                          }
                      });
                      
-                     canvas.add(img);
-                     canvas.sendObjectToBack(img);
-                     canvas.requestRenderAll();
+                     // AUTO-MASK: Clip to Car Body
+                     const templateImg = canvas.overlayImage as fabric.FabricImage;
+                     if (templateImg) {
+                        const offCanvas = document.createElement('canvas');
+                        offCanvas.width = 1024;
+                        offCanvas.height = 1024;
+                        const offCtx = offCanvas.getContext('2d');
+                        if (offCtx) {
+                            offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
+                            const maskDataURL = createBackgroundMask(offCtx, 1024, 1024);
+                            
+                            fabric.FabricImage.fromURL(maskDataURL).then(maskImg => {
+                                maskImg.absolutePositioned = true;
+                                maskImg.left = 0;
+                                maskImg.top = 0;
+                                maskImg.originX = 'left';
+                                maskImg.originY = 'top';
+                                
+                                img.clipPath = maskImg;
+                                
+                                canvas.add(img);
+                                canvas.sendObjectToBack(img);
+                                canvas.requestRenderAll();
+                            });
+                        } else {
+                             canvas.add(img);
+                             canvas.sendObjectToBack(img);
+                             canvas.requestRenderAll();
+                        }
+                     } else {
+                         canvas.add(img);
+                         canvas.sendObjectToBack(img);
+                         canvas.requestRenderAll();
+                     }
                      
                      // alert("AI Texture applied as full wrap. (Tip: Select a part first to apply only there!)");
                  }
