@@ -40,9 +40,8 @@ export default function RootLayout({
           data-message="Thank you for visiting. You can now buy me a coffeee."
           data-color="#FF813F"
           data-position="Right"
-          data-x_margin="18"
-          data-y_margin="18"
-          strategy="lazyOnload"
+          data-x_margin="30"
+          data-y_margin="200"
         />
       </body>
     </html>
