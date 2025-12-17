@@ -20,8 +20,8 @@ export default function BuyMeACoffee() {
     script.setAttribute('data-message', 'Thank you for visiting. You can now buy me a coffeee.');
     script.setAttribute('data-color', '#FF813F');
     script.setAttribute('data-position', 'Right');
-    script.setAttribute('data-x_margin', '30');
-    script.setAttribute('data-y_margin', '200');
+    script.setAttribute('data-x_margin', '100');
+    script.setAttribute('data-y_margin', '30');
     script.async = true;
 
     // 3. Handle loading and event triggering
@@ -63,8 +63,8 @@ export default function BuyMeACoffee() {
       rel="noreferrer"
       className="fixed z-[9999] flex items-center justify-center transition-transform hover:scale-105 shadow-lg"
       style={{
-        bottom: '200px',
-        right: '30px',
+        bottom: '30px',
+        right: '100px',
         width: '60px',
         height: '60px',
         backgroundColor: '#FF813F',
