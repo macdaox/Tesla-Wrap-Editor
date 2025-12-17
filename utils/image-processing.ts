@@ -293,6 +293,149 @@ export function createBackgroundMask(
 }
 
 /**
+ * Scans the image to find ALL distinct regions separated by lines.
+ * Returns an array of Point[] arrays, each representing a closed region polygon.
+ * Excludes the background region (detected via 0,0).
+ */
+export function detectAllRegions(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  tolerance: number = 40
+): Point[][] {
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+  const visited = new Uint8Array(width * height);
+  const regions: Point[][] = [];
+  
+  // 1. Identify Background Region (to ignore it)
+  // We can just flood fill from 0,0 and mark as visited, so we don't return it as a region.
+  // Unless the user WANTS the background? No, we assume car parts only.
+  const bgStack = [0, 0];
+  const bgStartPos = 0;
+  const bgR = data[bgStartPos];
+  const bgG = data[bgStartPos + 1];
+  const bgB = data[bgStartPos + 2];
+  
+  // Helper to match color
+  const match = (r: number, g: number, b: number, targetR: number, targetG: number, targetB: number) => {
+      const diff = Math.abs(r - targetR) + Math.abs(g - targetG) + Math.abs(b - targetB);
+      return diff <= tolerance * 3;
+  };
+  
+  // Mark background as visited
+  while (bgStack.length > 0) {
+      const y = bgStack.pop()!;
+      const x = bgStack.pop()!;
+      const idx = y * width + x;
+      const pos = idx * 4;
+      
+      if (visited[idx]) continue;
+      
+      const r = data[pos];
+      const g = data[pos + 1];
+      const b = data[pos + 2];
+      
+      // Strict check for background connectivity
+      if (match(r, g, b, bgR, bgG, bgB)) {
+          visited[idx] = 1; // Mark as visited (background)
+          
+          if (x > 0) bgStack.push(x - 1, y);
+          if (x < width - 1) bgStack.push(x + 1, y);
+          if (y > 0) bgStack.push(x, y - 1);
+          if (y < height - 1) bgStack.push(x, y + 1);
+      }
+  }
+  
+  // 2. Scan for other regions
+  // We skip every N pixels to speed up finding seeds
+  const step = 5; 
+  
+  for (let y = 0; y < height; y += step) {
+      for (let x = 0; x < width; x += step) {
+          const idx = y * width + x;
+          if (visited[idx]) continue;
+          
+          const pos = idx * 4;
+          const r = data[pos];
+          const g = data[pos + 1];
+          const b = data[pos + 2];
+          
+          // Ignore dark lines (assuming black lines)
+          // Brightness < 50 ?
+          const brightness = (r + g + b) / 3;
+          if (brightness < 50) {
+              visited[idx] = 1;
+              continue;
+          }
+          
+          // Found a new potential region seed!
+          // Perform detectRegion logic here (Flood Fill + Trace)
+          // But we need to reuse the `visited` map to avoid overlapping regions?
+          // `detectRegion` creates its own visited map.
+          // We should implement a custom flood fill here that updates OUR `visited` map.
+          
+          const regionPoints: Point[] = [];
+          const stack = [x, y];
+          const regionR = r;
+          const regionG = g;
+          const regionB = b;
+          
+          let minX = width, maxX = 0, minY = height, maxY = 0;
+          let pixelCount = 0;
+          
+          // Flood Fill this region
+          while (stack.length > 0) {
+              const cy = stack.pop()!;
+              const cx = stack.pop()!;
+              const cIdx = cy * width + cx;
+              
+              if (visited[cIdx]) continue;
+              
+              const cPos = cIdx * 4;
+              const cr = data[cPos];
+              const cg = data[cPos + 1];
+              const cb = data[cPos + 2];
+              
+              if (match(cr, cg, cb, regionR, regionG, regionB)) {
+                  visited[cIdx] = 1;
+                  pixelCount++;
+                  
+                  if (cx < minX) minX = cx;
+                  if (cx > maxX) maxX = cx;
+                  if (cy < minY) minY = cy;
+                  if (cy > maxY) maxY = cy;
+                  
+                  // Add neighbors
+                  if (cx > 0) stack.push(cx - 1, cy);
+                  if (cx < width - 1) stack.push(cx + 1, cy);
+                  if (cy > 0) stack.push(cx, cy - 1);
+                  if (cy < height - 1) stack.push(cx, cy + 1);
+              }
+          }
+          
+          // Filter small noise
+          if (pixelCount > 100) {
+              // Trace Boundary for this region
+              // We need to trace the boundary of the pixels we just marked.
+              // Since `visited` now contains ALL regions, we can't easily trace just THIS one using `visited`.
+              // We need to re-scan the bounding box of this region to find the boundary?
+              // Or better: Use `detectRegion` logic which returns the contour.
+              // But `detectRegion` does its own flood fill.
+              // It's fine to re-run flood fill for the contour generation, it's fast enough.
+              
+              const contour = detectRegion(ctx, x, y, width, height, tolerance);
+              if (contour && contour.length > 3) {
+                  regions.push(contour);
+              }
+          }
+      }
+  }
+  
+  return regions;
+}
+
+/**
  * Creates a cover mask where the background (connected to 0,0) is Opaque White,
  * and the isolated regions (car body) are Transparent.
  * Used for "Full Wrap" layering to hide the spillover.

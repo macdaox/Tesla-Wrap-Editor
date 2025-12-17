@@ -8,7 +8,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as fabric from 'fabric';
 import { Download, Eraser, Image as ImageIcon, MousePointer2, Wand2, Wand, PaintBucket, ChevronDown, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
-import { detectRegion, createBackgroundMask, createWhiteBackgroundCover } from '@/utils/image-processing';
+import { detectRegion, createBackgroundMask, createWhiteBackgroundCover, detectAllRegions } from '@/utils/image-processing';
 
 const VEHICLE_GROUPS = [
   { 
@@ -338,56 +338,75 @@ export default function Editor() {
                evented: false,
            });
            
-                   // AUTO-MASK: Cover the background with White
-                   const templateImg = canvas.overlayImage as fabric.FabricImage;
-                   if (templateImg) {
-                       const offCanvas = document.createElement('canvas');
-                       offCanvas.width = 1024;
-                       offCanvas.height = 1024;
-                       const offCtx = offCanvas.getContext('2d');
-                       if (offCtx) {
-                           offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
-                           
-                           // Use "White Cover" instead of "Clip Path"
-                           const coverDataURL = createWhiteBackgroundCover(offCtx, 1024, 1024);
-                           
-                           fabric.FabricImage.fromURL(coverDataURL).then(coverImg => {
-                               coverImg.absolutePositioned = true;
-                               coverImg.left = 0;
-                               coverImg.top = 0;
-                               coverImg.originX = 'left';
-                               coverImg.originY = 'top';
-                               coverImg.selectable = false;
-                               coverImg.evented = false;
-                               
-                               // Add Main Image
-                               canvas.add(img);
-                               canvas.sendObjectToBack(img);
-                               
-                               // Add Cover Mask (above Image, below Overlay)
-                               canvas.add(coverImg);
-                               // No need to bring forward, just adding it after 'img' puts it on top.
-                               // But 'img' was sent to back. So coverImg is definitely on top.
-                               // We need to ensure coverImg is BELOW the Overlay.
-                               // Since Overlay is not in getObjects(), it's always top.
-                               // But we need to ensure coverImg is ABOVE 'img'.
-                               
-                               // To be safe:
-                               canvas.sendObjectToBack(img); // img is index 0
-                               // coverImg is index 1 (or higher)
-                               
-                               canvas.requestRenderAll();
-                           });
-                       } else {
-                           canvas.add(img);
-                           canvas.sendObjectToBack(img);
-                           canvas.requestRenderAll();
-                       }
-                   } else {
-                       canvas.add(img);
-                       canvas.sendObjectToBack(img);
-                       canvas.requestRenderAll();
-                   }
+                   // AUTO-MASK: Segment and Fill All Regions
+                    const templateImg = canvas.overlayImage as fabric.FabricImage;
+                    if (templateImg) {
+                        const offCanvas = document.createElement('canvas');
+                        offCanvas.width = 1024;
+                        offCanvas.height = 1024;
+                        const offCtx = offCanvas.getContext('2d');
+                        if (offCtx) {
+                            offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
+                            
+                            // 1. Detect all valid car regions (excluding background)
+                            const regions = detectAllRegions(offCtx, 1024, 1024);
+                            
+                            if (regions.length > 0) {
+                                // 2. Create Pattern from the image
+                                const patternSource = img.getElement() as HTMLImageElement;
+                                
+                                // 3. Create a Polygon for each region and fill with pattern
+                                regions.forEach(points => {
+                                    // Create a new pattern instance for each polygon to ensure correct offset
+                                    // We need to offset the pattern so it looks continuous across polygons
+                                    // pattern.offsetX/Y should be relative to the polygon's position?
+                                    // Fabric pattern coords are relative to the object's top-left.
+                                    // To make the pattern align with the Canvas (0,0), we need:
+                                    // patternOffsetX = -polygon.left
+                                    // patternOffsetY = -polygon.top
+                                    
+                                    // We need to calculate the bounding box of the points to know polygon.left/top
+                                    const xs = points.map(p => p.x);
+                                    const ys = points.map(p => p.y);
+                                    const minX = Math.min(...xs);
+                                    const minY = Math.min(...ys);
+                                    
+                                    const pattern = new fabric.Pattern({
+                                        source: patternSource,
+                                        repeat: 'repeat',
+                                        patternTransform: [1, 0, 0, 1, -minX, -minY] // Offset pattern to align with canvas origin
+                                    });
+                                    
+                                    const polygon = new fabric.Polygon(points, {
+                                        fill: pattern,
+                                        stroke: 'transparent',
+                                        selectable: true,
+                                        evented: true,
+                                        objectCaching: false,
+                                    });
+                                    
+                                    canvas.add(polygon);
+                                    canvas.sendObjectToBack(polygon);
+                                });
+                                
+                                canvas.requestRenderAll();
+                                // alert(`Auto-wrapped ${regions.length} parts! You can select and delete unwanted parts (like windows).`);
+                            } else {
+                                // Fallback if detection fails
+                                canvas.add(img);
+                                canvas.sendObjectToBack(img);
+                                canvas.requestRenderAll();
+                            }
+                        } else {
+                            canvas.add(img);
+                            canvas.sendObjectToBack(img);
+                            canvas.requestRenderAll();
+                        }
+                    } else {
+                        canvas.add(img);
+                        canvas.sendObjectToBack(img);
+                        canvas.requestRenderAll();
+                    }
        }
     });
   };
@@ -757,7 +776,7 @@ export default function Editor() {
                          }
                      });
                      
-                     // AUTO-MASK: Cover the background with White
+                     // AUTO-MASK: Segment and Fill All Regions
                       const templateImg = canvas.overlayImage as fabric.FabricImage;
                       if (templateImg) {
                           const offCanvas = document.createElement('canvas');
@@ -767,27 +786,44 @@ export default function Editor() {
                           if (offCtx) {
                               offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
                               
-                              // Use "White Cover" instead of "Clip Path"
-                              const coverDataURL = createWhiteBackgroundCover(offCtx, 1024, 1024);
+                              // 1. Detect all valid car regions (excluding background)
+                              const regions = detectAllRegions(offCtx, 1024, 1024);
                               
-                              fabric.FabricImage.fromURL(coverDataURL).then(coverImg => {
-                                  coverImg.absolutePositioned = true;
-                                  coverImg.left = 0;
-                                  coverImg.top = 0;
-                                  coverImg.originX = 'left';
-                                  coverImg.originY = 'top';
-                                  coverImg.selectable = false;
-                                  coverImg.evented = false;
+                              if (regions.length > 0) {
+                                  // 2. Create Pattern from the image
+                                  const patternSource = img.getElement() as HTMLImageElement;
                                   
-                                  // Add Main Image
-                                  canvas.add(img);
-                                  canvas.sendObjectToBack(img);
-                                  
-                                  // Add Cover Mask
-                                  canvas.add(coverImg);
+                                  // 3. Create a Polygon for each region and fill with pattern
+                                  regions.forEach(points => {
+                                      const xs = points.map(p => p.x);
+                                      const ys = points.map(p => p.y);
+                                      const minX = Math.min(...xs);
+                                      const minY = Math.min(...ys);
+                                      
+                                      const pattern = new fabric.Pattern({
+                                          source: patternSource,
+                                          repeat: 'repeat',
+                                          patternTransform: [1, 0, 0, 1, -minX, -minY]
+                                      });
+                                      
+                                      const polygon = new fabric.Polygon(points, {
+                                          fill: pattern,
+                                          stroke: 'transparent',
+                                          selectable: true,
+                                          evented: true,
+                                          objectCaching: false,
+                                      });
+                                      
+                                      canvas.add(polygon);
+                                      canvas.sendObjectToBack(polygon);
+                                  });
                                   
                                   canvas.requestRenderAll();
-                              });
+                              } else {
+                                  canvas.add(img);
+                                  canvas.sendObjectToBack(img);
+                                  canvas.requestRenderAll();
+                              }
                           } else {
                                canvas.add(img);
                                canvas.sendObjectToBack(img);
