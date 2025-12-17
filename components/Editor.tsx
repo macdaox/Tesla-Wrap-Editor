@@ -337,6 +337,54 @@ export default function Editor() {
       }
   };
 
+  // Helper: Create clip path from all detected regions
+  const getCarClipPath = (canvas: fabric.Canvas): Promise<fabric.Group | null> => {
+      return new Promise((resolve) => {
+          const templateImg = canvas.overlayImage as fabric.FabricImage;
+          if (!templateImg) {
+              resolve(null);
+              return;
+          }
+
+          const offCanvas = document.createElement('canvas');
+          offCanvas.width = 1024;
+          offCanvas.height = 1024;
+          const offCtx = offCanvas.getContext('2d');
+          if (!offCtx) {
+              resolve(null);
+              return;
+          }
+
+          // Draw template to offscreen canvas
+          offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
+
+          // Detect all regions
+          const regions = detectAllRegions(offCtx, 1024, 1024);
+          
+          if (regions.length > 0) {
+              const clipObjects = regions.map(points => {
+                  return new fabric.Polygon(points, {
+                      objectCaching: false
+                  });
+              });
+              
+              // Create a Group of these polygons
+              const group = new fabric.Group(clipObjects, {
+                  originX: 'left',
+                  originY: 'top',
+                  left: 0,
+                  top: 0,
+                  absolutePositioned: true, // Key property for static clipPath
+                  objectCaching: false,
+              });
+              
+              resolve(group);
+          } else {
+              resolve(null);
+          }
+      });
+  };
+
   // Apply Preset (Overlay Image)
   const handleApplyPreset = (filename: string) => {
     if (!canvas) return;
@@ -345,7 +393,7 @@ export default function Editor() {
     // Check if user has a selection (Polygon)
     const activeObject = canvas.getActiveObject();
     
-    fabric.FabricImage.fromURL(url).then(img => {
+    fabric.FabricImage.fromURL(url).then(async (img) => {
        // Scale to fit canvas (1024x1024)
        const scale = 1024 / img.width!;
        img.scale(scale);
@@ -366,13 +414,14 @@ export default function Editor() {
        } else {
            // Default: Full Wrap (Background)
            
-           // Clear existing design layer (images that are not the overlay/mask)
+           // Clear existing design layer (images that are not the overlay)
            canvas.getObjects().forEach(obj => {
                if ((obj as any) !== canvas.overlayImage && (obj as any).name !== 'background_mask') {
                    canvas.remove(obj);
                }
            });
            
+           // Setup Image Properties
            img.set({
                left: 0,
                top: 0,
@@ -382,24 +431,25 @@ export default function Editor() {
                evented: true, // Allow user to move it
            });
            
-           canvas.add(img);
-           canvas.sendObjectToBack(img); // Send to bottom (below mask)
+           // Generate Clip Path (Car Body)
+           const clipPath = await getCarClipPath(canvas);
+           if (clipPath) {
+               img.clipPath = clipPath;
+           } else {
+               // alert("Could not detect car shape for masking. Applied without mask.");
+           }
            
-           // Ensure Mask is on top
+           canvas.add(img);
+           canvas.sendObjectToBack(img); 
+           
+           // Remove the old 'background_mask' if it exists (cleanup)
            const mask = canvas.getObjects().find(o => (o as any).name === 'background_mask');
-           if (mask) canvas.bringObjectToFront(mask);
+           if (mask) canvas.remove(mask);
            
            canvas.requestRenderAll();
        }
     });
   };
-
-  // Render Region Markers (Removed)
-  /*
-  useEffect(() => {
-    // ... code removed ...
-  }, [canvas, showRegions, selectedModel]);
-  */
 
   // Auto-Fill Logic (Click to Detect & Fill)
   useEffect(() => {
@@ -673,7 +723,7 @@ export default function Editor() {
     const reader = new FileReader();
     reader.onload = (f) => {
       const data = f.target?.result as string;
-      fabric.FabricImage.fromURL(data).then((img) => {
+      fabric.FabricImage.fromURL(data).then(async (img) => {
         img.scaleToWidth(300);
         
         // Check if user has a selection (Polygon)
@@ -704,12 +754,18 @@ export default function Editor() {
                  evented: true,
              });
 
+             // Generate Clip Path (Car Body)
+             const clipPath = await getCarClipPath(canvas);
+             if (clipPath) {
+                 img.clipPath = clipPath;
+             }
+
              canvas.add(img);
              canvas.sendObjectToBack(img);
              
-             // Ensure Mask is on top
+             // Remove the old 'background_mask' if it exists (cleanup)
              const mask = canvas.getObjects().find(o => (o as any).name === 'background_mask');
-             if (mask) canvas.bringObjectToFront(mask);
+             if (mask) canvas.remove(mask);
              
              canvas.requestRenderAll();
         }
