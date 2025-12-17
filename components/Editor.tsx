@@ -8,7 +8,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as fabric from 'fabric';
 import { Download, Eraser, Image as ImageIcon, MousePointer2, Wand2, Wand, PaintBucket, ChevronDown, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
-import { detectRegion, createBackgroundMask } from '@/utils/image-processing';
+import { detectRegion, createBackgroundMask, createWhiteBackgroundCover } from '@/utils/image-processing';
 
 const VEHICLE_GROUPS = [
   { 
@@ -338,42 +338,56 @@ export default function Editor() {
                evented: false,
            });
            
-           // AUTO-MASK: Clip to Car Body
-           // Create a mask from the template to hide the background
-           const templateImg = canvas.overlayImage as fabric.FabricImage;
-           if (templateImg) {
-               const offCanvas = document.createElement('canvas');
-               offCanvas.width = 1024;
-               offCanvas.height = 1024;
-               const offCtx = offCanvas.getContext('2d');
-               if (offCtx) {
-                   offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
-                   const maskDataURL = createBackgroundMask(offCtx, 1024, 1024);
-                   
-                   fabric.FabricImage.fromURL(maskDataURL).then(maskImg => {
-                       maskImg.absolutePositioned = true;
-                       maskImg.left = 0;
-                       maskImg.top = 0;
-                       maskImg.originX = 'left';
-                       maskImg.originY = 'top';
-                       
-                       img.clipPath = maskImg;
-                       
+                   // AUTO-MASK: Cover the background with White
+                   const templateImg = canvas.overlayImage as fabric.FabricImage;
+                   if (templateImg) {
+                       const offCanvas = document.createElement('canvas');
+                       offCanvas.width = 1024;
+                       offCanvas.height = 1024;
+                       const offCtx = offCanvas.getContext('2d');
+                       if (offCtx) {
+                           offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
+                           
+                           // Use "White Cover" instead of "Clip Path"
+                           const coverDataURL = createWhiteBackgroundCover(offCtx, 1024, 1024);
+                           
+                           fabric.FabricImage.fromURL(coverDataURL).then(coverImg => {
+                               coverImg.absolutePositioned = true;
+                               coverImg.left = 0;
+                               coverImg.top = 0;
+                               coverImg.originX = 'left';
+                               coverImg.originY = 'top';
+                               coverImg.selectable = false;
+                               coverImg.evented = false;
+                               
+                               // Add Main Image
+                               canvas.add(img);
+                               canvas.sendObjectToBack(img);
+                               
+                               // Add Cover Mask (above Image, below Overlay)
+                               canvas.add(coverImg);
+                               // No need to bring forward, just adding it after 'img' puts it on top.
+                               // But 'img' was sent to back. So coverImg is definitely on top.
+                               // We need to ensure coverImg is BELOW the Overlay.
+                               // Since Overlay is not in getObjects(), it's always top.
+                               // But we need to ensure coverImg is ABOVE 'img'.
+                               
+                               // To be safe:
+                               canvas.sendObjectToBack(img); // img is index 0
+                               // coverImg is index 1 (or higher)
+                               
+                               canvas.requestRenderAll();
+                           });
+                       } else {
+                           canvas.add(img);
+                           canvas.sendObjectToBack(img);
+                           canvas.requestRenderAll();
+                       }
+                   } else {
                        canvas.add(img);
                        canvas.sendObjectToBack(img);
                        canvas.requestRenderAll();
-                   });
-               } else {
-                   // Fallback without mask
-                   canvas.add(img);
-                   canvas.sendObjectToBack(img);
-                   canvas.requestRenderAll();
-               }
-           } else {
-               canvas.add(img);
-               canvas.sendObjectToBack(img);
-               canvas.requestRenderAll();
-           }
+                   }
        }
     });
   };
@@ -743,40 +757,47 @@ export default function Editor() {
                          }
                      });
                      
-                     // AUTO-MASK: Clip to Car Body
-                     const templateImg = canvas.overlayImage as fabric.FabricImage;
-                     if (templateImg) {
-                        const offCanvas = document.createElement('canvas');
-                        offCanvas.width = 1024;
-                        offCanvas.height = 1024;
-                        const offCtx = offCanvas.getContext('2d');
-                        if (offCtx) {
-                            offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
-                            const maskDataURL = createBackgroundMask(offCtx, 1024, 1024);
-                            
-                            fabric.FabricImage.fromURL(maskDataURL).then(maskImg => {
-                                maskImg.absolutePositioned = true;
-                                maskImg.left = 0;
-                                maskImg.top = 0;
-                                maskImg.originX = 'left';
-                                maskImg.originY = 'top';
-                                
-                                img.clipPath = maskImg;
-                                
-                                canvas.add(img);
-                                canvas.sendObjectToBack(img);
-                                canvas.requestRenderAll();
-                            });
-                        } else {
-                             canvas.add(img);
-                             canvas.sendObjectToBack(img);
-                             canvas.requestRenderAll();
-                        }
-                     } else {
-                         canvas.add(img);
-                         canvas.sendObjectToBack(img);
-                         canvas.requestRenderAll();
-                     }
+                     // AUTO-MASK: Cover the background with White
+                      const templateImg = canvas.overlayImage as fabric.FabricImage;
+                      if (templateImg) {
+                          const offCanvas = document.createElement('canvas');
+                          offCanvas.width = 1024;
+                          offCanvas.height = 1024;
+                          const offCtx = offCanvas.getContext('2d');
+                          if (offCtx) {
+                              offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
+                              
+                              // Use "White Cover" instead of "Clip Path"
+                              const coverDataURL = createWhiteBackgroundCover(offCtx, 1024, 1024);
+                              
+                              fabric.FabricImage.fromURL(coverDataURL).then(coverImg => {
+                                  coverImg.absolutePositioned = true;
+                                  coverImg.left = 0;
+                                  coverImg.top = 0;
+                                  coverImg.originX = 'left';
+                                  coverImg.originY = 'top';
+                                  coverImg.selectable = false;
+                                  coverImg.evented = false;
+                                  
+                                  // Add Main Image
+                                  canvas.add(img);
+                                  canvas.sendObjectToBack(img);
+                                  
+                                  // Add Cover Mask
+                                  canvas.add(coverImg);
+                                  
+                                  canvas.requestRenderAll();
+                              });
+                          } else {
+                               canvas.add(img);
+                               canvas.sendObjectToBack(img);
+                               canvas.requestRenderAll();
+                          }
+                      } else {
+                          canvas.add(img);
+                          canvas.sendObjectToBack(img);
+                          canvas.requestRenderAll();
+                      }
                      
                      // alert("AI Texture applied as full wrap. (Tip: Select a part first to apply only there!)");
                  }

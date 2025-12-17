@@ -291,3 +291,83 @@ export function createBackgroundMask(
   tempCtx.putImageData(maskImgData, 0, 0);
   return tempCanvas.toDataURL();
 }
+
+/**
+ * Creates a cover mask where the background (connected to 0,0) is Opaque White,
+ * and the isolated regions (car body) are Transparent.
+ * Used for "Full Wrap" layering to hide the spillover.
+ */
+export function createWhiteBackgroundCover(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  tolerance: number = 40
+): string {
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+  
+  const maskImgData = new ImageData(width, height);
+  const maskData = maskImgData.data;
+  
+  // Initialize with Transparent (Invisible)
+  // We will paint the background White
+  for (let i = 0; i < maskData.length; i += 4) {
+      maskData[i] = 0;     // R
+      maskData[i + 1] = 0; // G
+      maskData[i + 2] = 0; // B
+      maskData[i + 3] = 0; // Alpha (Invisible)
+  }
+  
+  // BFS to find background
+  const startX = 0;
+  const startY = 0;
+  const startPos = 0;
+  
+  const startR = data[startPos];
+  const startG = data[startPos + 1];
+  const startB = data[startPos + 2];
+  
+  const visited = new Uint8Array(width * height);
+  const stack = [startX, startY];
+  
+  const matchColor = (pos: number) => {
+      const r = data[pos];
+      const g = data[pos + 1];
+      const b = data[pos + 2];
+      const diff = Math.abs(r - startR) + Math.abs(g - startG) + Math.abs(b - startB);
+      return diff <= tolerance * 3;
+  };
+  
+  while (stack.length > 0) {
+      const y = stack.pop()!;
+      const x = stack.pop()!;
+      const idx = y * width + x;
+      const pos = idx * 4;
+      
+      if (visited[idx]) continue;
+      
+      if (matchColor(pos)) {
+          visited[idx] = 1;
+          
+          // MARK AS WHITE OPAQUE (Background Cover)
+          maskData[pos] = 255;     // R
+          maskData[pos + 1] = 255; // G
+          maskData[pos + 2] = 255; // B
+          maskData[pos + 3] = 255; // Alpha
+          
+          if (x > 0) stack.push(x - 1, y);
+          if (x < width - 1) stack.push(x + 1, y);
+          if (y > 0) stack.push(x, y - 1);
+          if (y < height - 1) stack.push(x, y + 1);
+      }
+  }
+  
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = width;
+  tempCanvas.height = height;
+  const tempCtx = tempCanvas.getContext('2d');
+  if (!tempCtx) return '';
+  
+  tempCtx.putImageData(maskImgData, 0, 0);
+  return tempCanvas.toDataURL();
+}
