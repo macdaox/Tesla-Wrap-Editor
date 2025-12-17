@@ -737,8 +737,24 @@ export default function Editor() {
       fabric.FabricImage.fromURL(data).then((img) => {
         img.scaleToWidth(300);
         
-        // Apply mask if exists
-        if (currentMask) {
+        // Check if user has a selection (Polygon)
+        const activeObject = canvas.getActiveObject();
+
+        if (activeObject && activeObject.type === 'polygon') {
+             // Apply as PATTERN to the selected region
+             const pattern = new fabric.Pattern({
+                 source: img.getElement() as HTMLImageElement,
+                 repeat: 'repeat',
+             });
+             
+             (activeObject as fabric.Polygon).set({
+                 fill: pattern,
+                 stroke: 'transparent', 
+             });
+             
+             canvas.requestRenderAll();
+        } else if (currentMask) {
+            // Deprecated path? If we have a currentMask (from old Auto Mask logic)
             currentMask.clone().then((clonedMask: fabric.Polygon) => {
                 clonedMask.absolutePositioned = true;
                 img.clipPath = clonedMask;
@@ -747,9 +763,75 @@ export default function Editor() {
                 canvas.setActiveObject(img);
             });
         } else {
-            canvas.add(img);
-            canvas.centerObject(img);
-            canvas.setActiveObject(img);
+             // NO SELECTION: Default to "Full Wrap" behavior (Auto-Segment)
+             
+             // 1. Center the image initially just in case detection fails
+             img.scaleToWidth(1024); // Full width
+             img.set({
+                 left: 0,
+                 top: 0,
+                 selectable: true,
+                 evented: false,
+             });
+
+             // 2. Attempt Auto-Segment
+             const templateImg = canvas.overlayImage as fabric.FabricImage;
+             if (templateImg) {
+                 const offCanvas = document.createElement('canvas');
+                 offCanvas.width = 1024;
+                 offCanvas.height = 1024;
+                 const offCtx = offCanvas.getContext('2d');
+                 if (offCtx) {
+                     offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
+                     
+                     // Detect regions
+                     const regions = detectAllRegions(offCtx, 1024, 1024);
+                     
+                     if (regions.length > 0) {
+                         const patternSource = img.getElement() as HTMLImageElement;
+                         
+                         const polygons = regions.map(points => {
+                             const xs = points.map(p => p.x);
+                             const ys = points.map(p => p.y);
+                             const minX = Math.min(...xs);
+                             const minY = Math.min(...ys);
+                             
+                             const pattern = new fabric.Pattern({
+                                 source: patternSource,
+                                 repeat: 'repeat',
+                                 patternTransform: [1, 0, 0, 1, -minX, -minY]
+                             });
+                             
+                             return new fabric.Polygon(points, {
+                                 fill: pattern,
+                                 stroke: 'transparent',
+                                 selectable: true,
+                                 evented: true,
+                                 objectCaching: false,
+                             });
+                         });
+                         
+                         canvas.add(...polygons);
+                         polygons.forEach(p => canvas.sendObjectToBack(p));
+                         canvas.requestRenderAll();
+                     } else {
+                         // Fallback: Just add the image (user will see it spills)
+                         // Or alert them
+                         alert("Could not auto-detect regions. Added image to canvas.");
+                         canvas.add(img);
+                         canvas.sendObjectToBack(img);
+                         canvas.requestRenderAll();
+                     }
+                 } else {
+                     canvas.add(img);
+                     canvas.sendObjectToBack(img);
+                     canvas.requestRenderAll();
+                 }
+             } else {
+                 canvas.add(img);
+                 canvas.sendObjectToBack(img);
+                 canvas.requestRenderAll();
+             }
         }
       });
     };
