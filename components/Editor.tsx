@@ -7,7 +7,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import * as fabric from 'fabric';
-import { Download, Eraser, Image as ImageIcon, MousePointer2, Wand2, Wand, PaintBucket, ChevronDown, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
+import { Download, Eraser, Image as ImageIcon, MousePointer2, Wand2, Wand, PaintBucket, ChevronDown, ZoomIn, ZoomOut, RotateCcw, Layers } from 'lucide-react';
 import { detectRegion, createBackgroundMask, createWhiteBackgroundCover, detectAllRegions } from '@/utils/image-processing';
 
 const VEHICLE_GROUPS = [
@@ -291,6 +291,50 @@ export default function Editor() {
           // I will add a notification when applying full wrap.
           resolve(null);
       });
+  };
+
+  // Auto-Select All Parts
+  const handleAutoSelectAll = () => {
+      if (!canvas) return;
+      const templateImg = canvas.overlayImage as fabric.FabricImage;
+      if (!templateImg) return;
+      
+      const offCanvas = document.createElement('canvas');
+      offCanvas.width = 1024;
+      offCanvas.height = 1024;
+      const offCtx = offCanvas.getContext('2d');
+      if (!offCtx) return;
+      
+      offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
+      const regions = detectAllRegions(offCtx, 1024, 1024);
+      
+      if (regions.length > 0) {
+          const polygons = regions.map(points => {
+              return new fabric.Polygon(points, {
+                  fill: 'rgba(0,0,255,0.1)', // Light blue selection
+                  stroke: '#0000ff',
+                  strokeWidth: 1,
+                  selectable: true,
+                  evented: true,
+                  objectCaching: false,
+              });
+          });
+          
+          canvas.add(...polygons);
+          polygons.forEach(p => canvas.sendObjectToBack(p));
+          
+          // Select all of them
+          const sel = new fabric.ActiveSelection(polygons, { canvas: canvas });
+          canvas.setActiveObject(sel);
+          canvas.requestRenderAll();
+          
+          setIsMagicWandMode(false); // Exit wand mode if active
+          setIsDrawing(false);
+          
+          // alert(`Selected ${regions.length} parts!`);
+      } else {
+          alert("Could not detect any closed regions. Please try 'Auto Mask' tool manually.");
+      }
   };
 
   // Apply Preset (Overlay Image)
@@ -790,50 +834,45 @@ export default function Editor() {
                               const regions = detectAllRegions(offCtx, 1024, 1024);
                               
                               if (regions.length > 0) {
-                                  // 2. Create Pattern from the image
-                                  const patternSource = img.getElement() as HTMLImageElement;
-                                  
-                                  // 3. Create a Polygon for each region and fill with pattern
-                                  regions.forEach(points => {
-                                      const xs = points.map(p => p.x);
-                                      const ys = points.map(p => p.y);
-                                      const minX = Math.min(...xs);
-                                      const minY = Math.min(...ys);
-                                      
-                                      const pattern = new fabric.Pattern({
-                                          source: patternSource,
-                                          repeat: 'repeat',
-                                          patternTransform: [1, 0, 0, 1, -minX, -minY]
-                                      });
-                                      
-                                      const polygon = new fabric.Polygon(points, {
-                                          fill: pattern,
-                                          stroke: 'transparent',
-                                          selectable: true,
-                                          evented: true,
-                                          objectCaching: false,
-                                      });
-                                      
-                                      canvas.add(polygon);
-                                      canvas.sendObjectToBack(polygon);
-                                  });
-                                  
-                                  canvas.requestRenderAll();
-                              } else {
-                                  canvas.add(img);
-                                  canvas.sendObjectToBack(img);
-                                  canvas.requestRenderAll();
-                              }
-                          } else {
-                               canvas.add(img);
-                               canvas.sendObjectToBack(img);
-                               canvas.requestRenderAll();
-                          }
-                      } else {
-                          canvas.add(img);
-                          canvas.sendObjectToBack(img);
-                          canvas.requestRenderAll();
-                      }
+                                // 2. Create Pattern from the image
+                                const patternSource = img.getElement() as HTMLImageElement;
+                                
+                                // 3. Create a Polygon for each region and fill with pattern
+                                const polygons = regions.map(points => {
+                                    const xs = points.map(p => p.x);
+                                    const ys = points.map(p => p.y);
+                                    const minX = Math.min(...xs);
+                                    const minY = Math.min(...ys);
+                                    
+                                    const pattern = new fabric.Pattern({
+                                        source: patternSource,
+                                        repeat: 'repeat',
+                                        patternTransform: [1, 0, 0, 1, -minX, -minY]
+                                    });
+                                    
+                                    return new fabric.Polygon(points, {
+                                        fill: pattern,
+                                        stroke: 'transparent',
+                                        selectable: true,
+                                        evented: true,
+                                        objectCaching: false,
+                                    });
+                                });
+                                
+                                canvas.add(...polygons);
+                                polygons.forEach(p => canvas.sendObjectToBack(p));
+                                canvas.requestRenderAll();
+                            } else {
+                                // Fallback if detection fails - Alert user instead of spilling
+                                alert("Could not auto-detect car parts. Please use 'Select All' or Magic Wand to select parts first.");
+                                // Do not add image to canvas background
+                            }
+                        } else {
+                            alert("Could not process template image.");
+                        }
+                    } else {
+                        alert("Template not loaded.");
+                    }
                      
                      // alert("AI Texture applied as full wrap. (Tip: Select a part first to apply only there!)");
                  }
@@ -961,6 +1000,13 @@ export default function Editor() {
                 >
                   <Wand size={20} className="mb-1" />
                   <span className="text-xs">Auto Mask</span>
+                </button>
+                <button
+                  onClick={handleAutoSelectAll}
+                  className="flex flex-col items-center justify-center p-3 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 bg-white"
+                >
+                  <Layers size={20} className="mb-1" />
+                  <span className="text-xs">Select All</span>
                 </button>
                 {currentMask && (
                     <button 

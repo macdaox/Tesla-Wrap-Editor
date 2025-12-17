@@ -318,13 +318,18 @@ export function detectAllRegions(
   const bgB = data[bgStartPos + 2];
   
   // Helper to match color
-  const match = (r: number, g: number, b: number, targetR: number, targetG: number, targetB: number) => {
-      const diff = Math.abs(r - targetR) + Math.abs(g - targetG) + Math.abs(b - targetB);
-      return diff <= tolerance * 3;
-  };
-  
-  // Mark background as visited
-  while (bgStack.length > 0) {
+   const match = (r: number, g: number, b: number, targetR: number, targetG: number, targetB: number) => {
+       // Darkness Barrier: If we are filling a light background (White), stop at dark lines.
+       // Assuming background is light (usually white).
+       const brightness = (r + g + b) / 3;
+       if (brightness < 100) return false; // Hard stop at dark lines
+       
+       const diff = Math.abs(r - targetR) + Math.abs(g - targetG) + Math.abs(b - targetB);
+       return diff <= tolerance * 3;
+   };
+   
+   // Mark background as visited
+   while (bgStack.length > 0) {
       const y = bgStack.pop()!;
       const x = bgStack.pop()!;
       const idx = y * width + x;
