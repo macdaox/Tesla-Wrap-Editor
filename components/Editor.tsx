@@ -337,53 +337,45 @@ export default function Editor() {
       }
   };
 
-  // Helper: Create clip path from all detected regions
-  const getCarClipPath = (canvas: fabric.Canvas): Promise<fabric.Group | null> => {
-      return new Promise((resolve) => {
-          const templateImg = canvas.overlayImage as fabric.FabricImage;
-          if (!templateImg) {
-              resolve(null);
-              return;
-          }
-
-          const offCanvas = document.createElement('canvas');
-          offCanvas.width = 1024;
-          offCanvas.height = 1024;
-          const offCtx = offCanvas.getContext('2d');
-          if (!offCtx) {
-              resolve(null);
-              return;
-          }
-
-          // Draw template to offscreen canvas
-          offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
-
-          // Detect all regions
-          const regions = detectAllRegions(offCtx, 1024, 1024);
-          
-          if (regions.length > 0) {
-              const clipObjects = regions.map(points => {
-                  return new fabric.Polygon(points, {
-                      objectCaching: false
-                  });
-              });
-              
-              // Create a Group of these polygons
-              const group = new fabric.Group(clipObjects, {
-                  originX: 'left',
-                  originY: 'top',
-                  left: 0,
-                  top: 0,
-                  absolutePositioned: true, // Key property for static clipPath
-                  objectCaching: false,
-              });
-              
-              resolve(group);
-          } else {
-              resolve(null);
-          }
-      });
-  };
+  // Helper: Create clip path from background mask (Bitmap approach)
+   const getCarClipPath = (canvas: fabric.Canvas): Promise<fabric.FabricImage | null> => {
+       return new Promise((resolve) => {
+           const templateImg = canvas.overlayImage as fabric.FabricImage;
+           if (!templateImg) {
+               resolve(null);
+               return;
+           }
+ 
+           const offCanvas = document.createElement('canvas');
+           offCanvas.width = 1024;
+           offCanvas.height = 1024;
+           const offCtx = offCanvas.getContext('2d');
+           if (!offCtx) {
+               resolve(null);
+               return;
+           }
+ 
+           // Draw template to offscreen canvas
+           offCtx.drawImage(templateImg.getElement(), 0, 0, 1024, 1024);
+ 
+           // Generate Mask Data URL (Car = Opaque, Background = Transparent)
+           const maskDataURL = createBackgroundMask(offCtx, 1024, 1024);
+           
+           fabric.FabricImage.fromURL(maskDataURL).then(maskImg => {
+               maskImg.set({
+                   left: 0,
+                   top: 0,
+                   originX: 'left',
+                   originY: 'top',
+                   absolutePositioned: true, // Key property for static clipPath
+                   objectCaching: false,
+                   scaleX: 1,
+                   scaleY: 1
+               });
+               resolve(maskImg);
+           }).catch(() => resolve(null));
+       });
+   };
 
   // Apply Preset (Overlay Image)
   const handleApplyPreset = (filename: string) => {
