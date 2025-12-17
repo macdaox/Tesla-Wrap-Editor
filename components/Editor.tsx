@@ -767,6 +767,30 @@ export default function Editor() {
   const handleExport = () => {
     if (!canvas) return;
     
+    // 1. Deselect everything to remove selection handles
+    canvas.discardActiveObject();
+    
+    // 2. Hide Helper Objects (Masks, Unfilled Selections) before export
+    const hiddenObjects: fabric.Object[] = [];
+    
+    canvas.getObjects().forEach(obj => {
+        // Magic Wand Mask (Dashed Polygon)
+        if (obj instanceof fabric.Polygon && obj.strokeDashArray) {
+            obj.visible = false;
+            hiddenObjects.push(obj);
+        }
+        
+        // Auto-Select Regions (Unfilled Blue Polygons)
+        // They are initialized with fill: 'rgba(0,0,255,0.1)'
+        // We check strict equality on the fill property string
+        if (obj instanceof fabric.Polygon && obj.fill === 'rgba(0,0,255,0.1)') {
+            obj.visible = false;
+            hiddenObjects.push(obj);
+        }
+    });
+    
+    canvas.requestRenderAll();
+    
     // Save current zoom/viewport state
     const savedZoom = canvas.getZoom();
     const savedViewport = [...(canvas.viewportTransform || [1, 0, 0, 1, 0, 0])];
@@ -787,6 +811,10 @@ export default function Editor() {
     // Restore previous zoom/viewport state
     canvas.setViewportTransform(savedViewport as any);
     canvas.setZoom(savedZoom);
+    
+    // Restore Visibility of helpers
+    hiddenObjects.forEach(obj => obj.visible = true);
+    
     canvas.requestRenderAll();
     
     const link = document.createElement('a');
