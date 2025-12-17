@@ -1293,19 +1293,6 @@ export default function Editor() {
 
       {/* Main Canvas */}
       <div className="flex-1 bg-gray-100 overflow-hidden relative flex items-center justify-center p-8">
-         {/* Buy Me a Coffee Button */}
-         <a 
-            href="https://www.buymeacoffee.com/macdao" 
-            target="_blank" 
-            rel="noreferrer" 
-            className="absolute top-8 left-8 z-50 transition-transform hover:scale-105"
-         >
-            <img 
-                src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=macdao&button_colour=5F7FFF&font_colour=ffffff&font_family=Cookie&outline_colour=000000&coffee_colour=FFDD00" 
-                alt="Buy me a coffee" 
-            />
-         </a>
-
          <div className="bg-white shadow-2xl border border-gray-200">
             <canvas ref={canvasRef} />
          </div>
