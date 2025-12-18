@@ -987,6 +987,10 @@ export default function Editor() {
         }
     });
     
+    // 3. Temporarily hide the Template Overlay
+    const originalOverlay = canvas.overlayImage;
+    canvas.overlayImage = undefined; // Remove overlay for export
+
     canvas.requestRenderAll();
     
     // Save current zoom/viewport state
@@ -997,7 +1001,7 @@ export default function Editor() {
     canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
     canvas.setZoom(1);
 
-    // To ensure the overlay (multiply mode) is rendered correctly, we rely on toDataURL
+    // Export Texture (Without overlay)
     const dataURL = canvas.toDataURL({
       format: 'png',
       quality: 1,
@@ -1012,6 +1016,11 @@ export default function Editor() {
     
     // Restore Visibility of helpers
     hiddenObjects.forEach(obj => obj.visible = true);
+    
+    // Restore Overlay
+    if (originalOverlay) {
+        canvas.overlayImage = originalOverlay;
+    }
     
     canvas.requestRenderAll();
     
