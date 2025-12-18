@@ -7,9 +7,10 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import * as fabric from 'fabric';
-import { Download, Eraser, Image as ImageIcon, MousePointer2, Wand2, Wand, PaintBucket, ChevronDown, ZoomIn, ZoomOut, RotateCcw, Layers } from 'lucide-react';
+import { Download, Eraser, Image as ImageIcon, MousePointer2, Wand2, Wand, PaintBucket, ChevronDown, ZoomIn, ZoomOut, RotateCcw, Layers, Eye } from 'lucide-react';
 import { detectRegion, createBackgroundMask, createWhiteBackgroundCover, detectAllRegions } from '@/utils/image-processing';
 import { Globe } from 'lucide-react';
+import Preview3D from './Preview3D';
 
 const TRANSLATIONS = {
   en: {
@@ -34,6 +35,7 @@ const TRANSLATIONS = {
     dreaming: "Dreaming...",
     generateTexture: "Generate Texture",
     resetAll: "Reset All",
+    preview3D: "3D Preview",
     exportDesign: "Export Design",
     alertTemplateNotLoaded: "Template not loaded!",
     alertRegionMasked: "Region masked! Now you can upload a sticker into this area.",
@@ -74,6 +76,7 @@ const TRANSLATIONS = {
     dreaming: "生成中...",
     generateTexture: "生成纹理",
     resetAll: "重置所有",
+    preview3D: "3D 预览",
     exportDesign: "导出设计图",
     alertTemplateNotLoaded: "模版未加载！",
     alertRegionMasked: "区域已遮罩！现在你可以上传贴纸到该区域。",
@@ -153,6 +156,10 @@ export default function Editor() {
 
   // Zoom State
   const [zoom, setZoom] = useState(1);
+
+  // Preview State
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [previewTexture, setPreviewTexture] = useState('');
 
   // Initialize Canvas
   useEffect(() => {
@@ -825,6 +832,40 @@ export default function Editor() {
     document.body.removeChild(link);
   };
 
+  const handlePreview = () => {
+    if (!canvas) return;
+    
+    // Deselect
+    canvas.discardActiveObject();
+    
+    // Hide helpers similar to export
+    const hiddenObjects: fabric.Object[] = [];
+    canvas.getObjects().forEach(obj => {
+        if ((obj instanceof fabric.Polygon && obj.strokeDashArray) ||
+            (obj instanceof fabric.Polygon && obj.fill === 'rgba(0,0,255,0.1)')) {
+            obj.visible = false;
+            hiddenObjects.push(obj);
+        }
+    });
+    canvas.requestRenderAll();
+
+    // Export Texture (Use a reasonable size, 1024 is fine)
+    const dataURL = canvas.toDataURL({
+        format: 'png',
+        quality: 0.8,
+        multiplier: 1,
+        width: 1024,
+        height: 1024
+    });
+    
+    // Restore
+    hiddenObjects.forEach(obj => obj.visible = true);
+    canvas.requestRenderAll();
+    
+    setPreviewTexture(dataURL);
+    setIsPreviewOpen(true);
+  };
+
   const handleAddImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!canvas || !e.target.files?.[0]) return;
     const file = e.target.files[0];
@@ -1282,14 +1323,28 @@ export default function Editor() {
             >
                 <Eraser size={16} /> {t.resetAll}
             </button>
-            <button
-                onClick={handleExport}
-                className="w-full py-3 bg-gray-900 text-white rounded-lg text-sm font-bold shadow-lg hover:bg-black transition-all flex items-center justify-center gap-2"
-            >
-                <Download size={18} /> {t.exportDesign}
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+                <button
+                    onClick={handlePreview}
+                    className="w-full py-3 bg-blue-600 text-white rounded-lg text-sm font-bold shadow-lg hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
+                >
+                    <Eye size={18} /> {t.preview3D}
+                </button>
+                <button
+                    onClick={handleExport}
+                    className="w-full py-3 bg-gray-900 text-white rounded-lg text-sm font-bold shadow-lg hover:bg-black transition-all flex items-center justify-center gap-2"
+                >
+                    <Download size={18} /> {t.exportDesign}
+                </button>
+            </div>
         </div>
       </div>
+
+      <Preview3D 
+        isOpen={isPreviewOpen} 
+        onClose={() => setIsPreviewOpen(false)} 
+        textureUrl={previewTexture} 
+      />
 
       {/* Main Canvas */}
       <div className="flex-1 bg-gray-100 overflow-hidden relative flex items-center justify-center p-8">
