@@ -54,6 +54,8 @@ const TRANSLATIONS = {
     'Model Y (2025+) Premium': "Model Y (2025+) Premium",
     'Model Y (2025+) Performance': "Model Y (2025+) Performance",
     'Model Y L': "Model Y L",
+    // Instructions
+    selectionTip: "Click directly on a part to edit. If you can't select, you might have a full wrap applied—delete (Backspace/Delete) the outer frame.",
   },
   zh: {
     title: "特斯拉贴膜编辑器",
@@ -96,6 +98,8 @@ const TRANSLATIONS = {
     'Model Y (2025+) Premium': "Model Y (2025+) 长续航版",
     'Model Y (2025+) Performance': "Model Y (2025+) 高性能版",
     'Model Y L': "Model Y 加长版",
+    // Instructions
+    selectionTip: "鼠标直接点击模块即可编辑，如果无法选择，可能是全选了，删除(键盘删除键)最外框即可。",
   }
 };
 
@@ -165,6 +169,9 @@ export default function Editor() {
   // Preview State
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewTexture, setPreviewTexture] = useState('');
+  
+  // Warning State
+  const [warningMsg, setWarningMsg] = useState<string | null>(null);
 
   // Initialize Canvas
   useEffect(() => {
@@ -213,9 +220,28 @@ export default function Editor() {
                  fabricCanvas.remove(activeObj);
                  fabricCanvas.discardActiveObject();
                  fabricCanvas.requestRenderAll();
+                 setWarningMsg(null); // Clear warning on delete
             }
         }
     };
+    
+    // Selection Listeners for Full Wrap Warning
+    const handleSelection = (e: any) => {
+        const selected = e.selected?.[0];
+        if (selected && selected.name === 'full_wrap') {
+            setWarningMsg(lang === 'zh' ? "检测到覆盖选区（全车改色），请删除后方可编辑内部细节。" : "Full wrap detected. Please delete it to edit internal details.");
+        } else {
+            setWarningMsg(null);
+        }
+    };
+    
+    const handleSelectionCleared = () => {
+        setWarningMsg(null);
+    };
+
+    fabricCanvas.on('selection:created', handleSelection);
+    fabricCanvas.on('selection:updated', handleSelection);
+    fabricCanvas.on('selection:cleared', handleSelectionCleared);
     
     window.addEventListener('keydown', handleKeyDown);
 
@@ -560,6 +586,7 @@ export default function Editor() {
                originY: 'center',
                selectable: true,
                evented: true,
+               // name: 'sticker', // Normal stickers are fine
            });
            canvas.add(img);
            canvas.setActiveObject(img);
@@ -612,6 +639,7 @@ export default function Editor() {
                originY: 'top',
                selectable: true,
                evented: true, // Allow user to move it
+               name: 'full_wrap', // Mark as full wrap
            });
            
            // Generate Clip Path (Car Body)
@@ -679,8 +707,17 @@ export default function Editor() {
         } 
         
         // CASE 2: Default Mode (Auto-Select Part)
-        // If we are NOT drawing/wand, and user clicked on the "car" (background) but NOT an existing object
-        if (!isDrawing && !isMagicWandMode && !activeObj && canvas.findTarget(opt.e) === undefined) {
+        // Check if we clicked on empty space OR on the "full_wrap" background layer
+        // This allows us to "click through" the full wrap to select parts underneath (by detecting them on the fly)
+        const target = canvas.findTarget(opt.e);
+        const isTargetFullWrap = target && (target as any).name === 'full_wrap';
+        
+        // Allow detection if:
+        // 1. No object is currently active OR the active object is the full wrap
+        // 2. AND we clicked on nothing OR we clicked on the full wrap
+        const isSafeToDetect = (!activeObj || (activeObj as any).name === 'full_wrap') && (!target || isTargetFullWrap);
+
+        if (!isDrawing && !isMagicWandMode && isSafeToDetect) {
              // User clicked on empty space (the overlay image is 'evented: false' so it passes through? 
              // Wait, overlayImage is NOT evented. So findTarget returns undefined.
              
@@ -714,7 +751,9 @@ export default function Editor() {
                 
                 canvas.add(polygon);
                 canvas.setActiveObject(polygon);
-                canvas.sendObjectToBack(polygon); // Keep it under the overlay
+                // Do NOT send to back here, because we want it ON TOP of the Full Wrap image.
+                // The Overlay Image is handled separately by Fabric (canvas.overlayImage), so it's always on top anyway.
+                // canvas.sendObjectToBack(polygon); 
                 canvas.requestRenderAll();
                 // Don't alert, just select naturally
             }
@@ -826,8 +865,8 @@ export default function Editor() {
         });
         canvas.add(polygon);
         
-        // Ensure the polygon is behind the template overlay
-        canvas.sendObjectToBack(polygon);
+        // Ensure the polygon is behind the template overlay BUT above the full wrap
+        // canvas.sendObjectToBack(polygon); // REMOVED
         
         // AUTO-SELECT the new region so AI tools know what to target
         canvas.setActiveObject(polygon);
@@ -938,11 +977,13 @@ export default function Editor() {
         }
         
         // Auto-Select Regions (Unfilled Blue Polygons)
-        // They are initialized with fill: 'rgba(0,0,255,0.1)'
-        // We check strict equality on the fill property string
-        if (obj instanceof fabric.Polygon && obj.fill === 'rgba(0,0,255,0.1)') {
-            obj.visible = false;
-            hiddenObjects.push(obj);
+        // They are initialized with fill: 'rgba(0,0,255,0.1)' OR 'rgba(0,0,0,0.01)'
+        // We hide them so the blue outline doesn't show in export
+        if (obj instanceof fabric.Polygon) {
+             if (obj.fill === 'rgba(0,0,255,0.1)' || obj.fill === 'rgba(0,0,0,0.01)') {
+                obj.visible = false;
+                hiddenObjects.push(obj);
+             }
         }
     });
     
@@ -1093,6 +1134,7 @@ export default function Editor() {
                  top: 0,
                  selectable: true,
                  evented: true,
+                 name: 'full_wrap', // Mark as full wrap
              });
 
              // Generate Clip Path (Car Body)
@@ -1311,42 +1353,27 @@ export default function Editor() {
                   </div>
               )}
 
-              {/* Tools */}
-              <div className="grid grid-cols-2 gap-2 mb-4">
-                <button
-                  onClick={() => setIsMagicWandMode(!isMagicWandMode)}
-                  className={`flex flex-col items-center justify-center p-3 rounded-lg border transition-all ${
-                    isMagicWandMode ? 'bg-purple-50 border-purple-500 text-purple-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  <Wand size={20} className="mb-1" />
-                  <span className="text-xs">{t.autoMask}</span>
-                </button>
-                <button
-                  onClick={handleAutoSelectAll}
-                  className="flex flex-col items-center justify-center p-3 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 bg-white"
-                >
-                  <Layers size={20} className="mb-1" />
-                  <span className="text-xs">{t.selectAll}</span>
-                </button>
-                {currentMask && (
-                    <button 
-                        onClick={() => {
-                            setCurrentMask(null);
-                            setIsMagicWandMode(false);
-                            // Remove visual mask
-                            const objs = canvas?.getObjects();
-                            if (objs) {
-                                const maskObj = objs.find(o => o instanceof fabric.Polygon && o.strokeDashArray);
-                                if (maskObj) canvas?.remove(maskObj);
-                            }
-                        }}
-                        className="flex flex-col items-center justify-center p-3 rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
-                    >
-                        <Eraser size={20} className="mb-1" />
-                        <span className="text-xs">{t.clearMask}</span>
-                    </button>
-                )}
+              {/* Tools - Replaced with Instructions */}
+              <div className="mb-4 p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-800 leading-relaxed">
+                  {t.selectionTip}
+                  {currentMask && (
+                      <button 
+                          onClick={() => {
+                              setCurrentMask(null);
+                              setIsMagicWandMode(false);
+                              // Remove visual mask
+                              const objs = canvas?.getObjects();
+                              if (objs) {
+                                  const maskObj = objs.find(o => o instanceof fabric.Polygon && o.strokeDashArray);
+                                  if (maskObj) canvas?.remove(maskObj);
+                              }
+                          }}
+                          className="mt-2 flex items-center gap-1 text-red-600 font-bold hover:text-red-700"
+                      >
+                          <Eraser size={14} />
+                          <span>{t.clearMask}</span>
+                      </button>
+                  )}
               </div>
             </section>
 
@@ -1580,6 +1607,30 @@ export default function Editor() {
 
       {/* Main Canvas */}
       <div className="flex-1 bg-gray-100 overflow-hidden relative flex items-center justify-center p-8">
+         
+         {/* Warning Banner */}
+         {warningMsg && (
+             <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded shadow-lg z-50 flex items-center gap-4 animate-in fade-in slide-in-from-top-4 duration-300">
+                 <span className="font-medium text-sm">{warningMsg}</span>
+                 <button 
+                    onClick={() => {
+                        if (canvas) {
+                            const active = canvas.getActiveObject();
+                            if (active) {
+                                canvas.remove(active);
+                                canvas.discardActiveObject();
+                                canvas.requestRenderAll();
+                                setWarningMsg(null);
+                            }
+                        }
+                    }}
+                    className="bg-red-600 text-white px-3 py-1 rounded text-xs hover:bg-red-700 transition-colors"
+                 >
+                    {lang === 'zh' ? '删除' : 'Delete'}
+                 </button>
+             </div>
+         )}
+         
          <div className="bg-white shadow-2xl border border-gray-200">
             <canvas ref={canvasRef} />
          </div>
