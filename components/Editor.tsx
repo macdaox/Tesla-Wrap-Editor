@@ -21,6 +21,7 @@ const TRANSLATIONS = {
     selectAll: "Select All",
     clearMask: "Clear Mask",
     templates: "Templates",
+    materials: "Materials",
     designTools: "Design Tools",
     select: "Select",
     fillColor: "Fill Color",
@@ -62,6 +63,7 @@ const TRANSLATIONS = {
     selectAll: "全选区域",
     clearMask: "清除遮罩",
     templates: "预设模版",
+    materials: "素材库",
     designTools: "设计工具",
     select: "选择区域",
     fillColor: "填充颜色",
@@ -153,6 +155,9 @@ export default function Editor() {
   
   // Presets
   const [presets, setPresets] = useState<string[]>([]);
+  // Stickers
+  const [stickers, setStickers] = useState<string[]>([]);
+  const [sidebarTab, setSidebarTab] = useState<'templates' | 'stickers'>('templates');
 
   // Zoom State
   const [zoom, setZoom] = useState(1);
@@ -253,6 +258,14 @@ export default function Editor() {
       })
       .catch(err => console.error("Failed to load presets", err));
   }, [selectedModel]);
+
+  // Fetch stickers
+  useEffect(() => {
+    fetch('/stickers.json')
+      .then(res => res.json())
+      .then(data => setStickers(data))
+      .catch(err => console.error("Failed to load stickers", err));
+  }, []);
 
   // Load Background (Design) & Overlay (Template Wireframe)
   useEffect(() => {
@@ -472,6 +485,89 @@ export default function Editor() {
        });
    };
 
+  // Apply Sticker
+  const handleApplySticker = (filename: string) => {
+    if (!canvas) return;
+    const url = `/assets/stickers/${filename}`;
+    
+    // Check if user has a selection (Polygon)
+    const activeObject = canvas.getActiveObject();
+    
+    fabric.FabricImage.fromURL(url).then(async (img) => {
+       
+       if (activeObject && activeObject.type === 'polygon') {
+           const polygon = activeObject as fabric.Polygon;
+
+            // 3. Apply Sticker using ClipPath (Robust & Centered)
+            // This method creates a new image layer that is clipped by the polygon shape.
+            
+            // Clone the polygon to use as a mask
+            // Use simple clone and property setting to avoid type issues
+            const mask = new fabric.Polygon(polygon.points, {
+                left: polygon.left,
+                top: polygon.top,
+                angle: polygon.angle,
+                scaleX: polygon.scaleX,
+                scaleY: polygon.scaleY,
+                skewX: polygon.skewX,
+                skewY: polygon.skewY,
+                originX: polygon.originX,
+                originY: polygon.originY,
+                absolutePositioned: true, 
+                fill: 'black',
+                strokeWidth: 0,
+                opacity: 1,
+                objectCaching: false,
+                selectable: false,
+                evented: false
+            });
+
+            // Calculate scale to fit sticker nicely (60% of bounds)
+            const bounds = polygon.getBoundingRect();
+            const polyWidth = bounds.width;
+            const polyHeight = bounds.height;
+            const imgW = img.width || 100;
+            const imgH = img.height || 100;
+            
+            const scale = (Math.min(polyWidth, polyHeight) * 0.6) / Math.max(imgW, imgH);
+            
+            // Center the image on the polygon's visual center
+            const center = polygon.getCenterPoint();
+
+            img.set({
+                scaleX: scale,
+                scaleY: scale,
+                left: center.x,
+                top: center.y,
+                originX: 'center',
+                originY: 'center',
+                clipPath: mask, // Apply the mask
+                selectable: true,
+                evented: true,
+            });
+            
+            canvas.add(img);
+            canvas.setActiveObject(img);
+            canvas.requestRenderAll();
+            
+       } else {
+           // Center on canvas
+           img.scaleToWidth(300);
+           img.set({
+               left: (canvas.width || 1024) / 2,
+               top: (canvas.height || 1024) / 2,
+               originX: 'center',
+               originY: 'center',
+               selectable: true,
+               evented: true,
+           });
+           canvas.add(img);
+           canvas.setActiveObject(img);
+       }
+       canvas.requestRenderAll();
+    });
+  };
+
   // Apply Preset (Overlay Image)
   const handleApplyPreset = (filename: string) => {
     if (!canvas) return;
@@ -558,6 +654,7 @@ export default function Editor() {
             canvas.defaultCursor = 'crosshair';
             canvas.selection = false;
         }
+    // Default: Select Mode - Auto-detect region if clicking on empty car part
     } else {
         if (canvas) {
             canvas.defaultCursor = 'default';
@@ -570,9 +667,62 @@ export default function Editor() {
     let detectedPoints: any[] | null = null;
 
     const handleMouseDown = (opt: any) => {
-        if (!isDrawing) return; // Only process if in Paint Mode
-        
         const pointer = canvas.getScenePoint(opt.e);
+        const activeObj = canvas.getActiveObject();
+
+        // CASE 1: Paint Mode or Magic Wand (Existing Logic)
+        if (isDrawing || isMagicWandMode) {
+             // ... (Logic handled below in specific blocks, or merged here?)
+             // actually the previous code had separate handlers. Let's merge or keep clean.
+             // To minimize diff risk, I will inject the "Auto-Select" logic separately if possible.
+             // But the `useEffect` dependencies list is long.
+        } 
+        
+        // CASE 2: Default Mode (Auto-Select Part)
+        // If we are NOT drawing/wand, and user clicked on the "car" (background) but NOT an existing object
+        if (!isDrawing && !isMagicWandMode && !activeObj && canvas.findTarget(opt.e) === undefined) {
+             // User clicked on empty space (the overlay image is 'evented: false' so it passes through? 
+             // Wait, overlayImage is NOT evented. So findTarget returns undefined.
+             
+            const templateImg = canvas.overlayImage as fabric.FabricImage;
+            if (!templateImg) return;
+
+            const offCanvas = document.createElement('canvas');
+            const cWidth = canvas.width || 1024;
+            const cHeight = canvas.height || 1024;
+            offCanvas.width = cWidth;
+            offCanvas.height = cHeight;
+            const offCtx = offCanvas.getContext('2d');
+            if (!offCtx) return;
+
+            const originalElement = templateImg.getElement();
+            offCtx.drawImage(originalElement, 0, 0, cWidth, cHeight);
+            
+            // Detect Region
+            const regionPoints = detectRegion(offCtx, pointer.x, pointer.y, cWidth, cHeight);
+            
+            if (regionPoints && regionPoints.length > 3) {
+                // Create a transparent selection polygon
+                const polygon = new fabric.Polygon(regionPoints, {
+                    fill: 'rgba(0,0,0,0.01)', // Almost transparent, but clickable
+                    stroke: '#0000ff', // Blue outline to show selection
+                    strokeWidth: 2,
+                    selectable: true,
+                    evented: true,
+                    objectCaching: false,
+                });
+                
+                canvas.add(polygon);
+                canvas.setActiveObject(polygon);
+                canvas.sendObjectToBack(polygon); // Keep it under the overlay
+                canvas.requestRenderAll();
+                // Don't alert, just select naturally
+            }
+        }
+
+        if (!isDrawing) return; // Only process Paint logic if in Paint Mode
+        
+        // ... (Rest of Paint Logic)
         
         // 1. Get Template for Detection
         const templateImg = canvas.overlayImage as fabric.FabricImage;
@@ -879,18 +1029,60 @@ export default function Editor() {
         const activeObject = canvas.getActiveObject();
 
         if (activeObject && activeObject.type === 'polygon') {
-             // Apply as PATTERN to the selected region
-             const pattern = new fabric.Pattern({
-                 source: img.getElement() as HTMLImageElement,
-                 repeat: 'repeat',
-             });
+             const polygon = activeObject as fabric.Polygon;
              
-             (activeObject as fabric.Polygon).set({
-                 fill: pattern,
-                 stroke: 'transparent', 
-             });
+             // UNIFIED LOGIC: Use ClipPath (Window Effect) instead of Pattern
+             // This allows the user to move/scale the image inside the selected part.
              
-             canvas.requestRenderAll();
+             // 1. Create Mask (Clone of Polygon)
+             const mask = new fabric.Polygon(polygon.points, {
+                left: polygon.left,
+                top: polygon.top,
+                angle: polygon.angle,
+                scaleX: polygon.scaleX,
+                scaleY: polygon.scaleY,
+                skewX: polygon.skewX,
+                skewY: polygon.skewY,
+                originX: polygon.originX,
+                originY: polygon.originY,
+                absolutePositioned: true, 
+                fill: 'black',
+                strokeWidth: 0,
+                opacity: 1,
+                objectCaching: false,
+                selectable: false,
+                evented: false
+            });
+            
+            // 2. Calculate Scale (Fit nicely)
+            const bounds = polygon.getBoundingRect();
+            const polyWidth = bounds.width;
+            const polyHeight = bounds.height;
+            const imgW = img.width || 100;
+            const imgH = img.height || 100;
+            
+            // Fit to 60% of the part, or at least visible
+            const scale = (Math.min(polyWidth, polyHeight) * 0.6) / Math.max(imgW, imgH);
+            
+            // 3. Position Image (Center)
+            const center = polygon.getCenterPoint();
+            
+            img.set({
+                scaleX: scale,
+                scaleY: scale,
+                left: center.x,
+                top: center.y,
+                originX: 'center',
+                originY: 'center',
+                clipPath: mask,
+                selectable: true,
+                evented: true
+            });
+            
+            canvas.add(img);
+            canvas.setActiveObject(img);
+            canvas.requestRenderAll();
+            
         } else {
              // NO SELECTION: Default to "Full Wrap" behavior
              
@@ -1158,29 +1350,69 @@ export default function Editor() {
               </div>
             </section>
 
-            {/* Presets */}
+            {/* Presets & Materials */}
             <section>
-               <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex justify-between items-center">
-                  <span>{t.templates}</span>
-                  <span className="text-[10px] bg-gray-100 px-2 py-0.5 rounded-full text-gray-500">{presets.length}</span>
-               </h2>
-               <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
-                  {presets.map(p => (
-                      <button 
-                        key={p} 
-                        onClick={() => handleApplyPreset(p)}
-                        className="relative group aspect-square rounded-md overflow-hidden border border-gray-200 hover:border-blue-500 transition-all"
-                        title={p}
-                      >
-                         <img 
-                            src={`/assets/${selectedModel}/example/${p}`} 
-                            alt={p} 
-                            className="w-full h-full object-cover" 
-                            loading="lazy"
-                         />
-                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
-                      </button>
-                  ))}
+               <div className="flex items-center gap-4 mb-3 border-b border-gray-100">
+                  <button 
+                     onClick={() => setSidebarTab('templates')}
+                     className={`text-xs font-bold uppercase tracking-wider pb-2 transition-all ${sidebarTab === 'templates' ? 'text-gray-900 border-b-2 border-black' : 'text-gray-400 hover:text-gray-600'}`}
+                  >
+                     {t.templates} <span className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded-full text-gray-500 ml-1">{presets.length}</span>
+                  </button>
+                  <button 
+                     onClick={() => setSidebarTab('stickers')}
+                     className={`text-xs font-bold uppercase tracking-wider pb-2 transition-all ${sidebarTab === 'stickers' ? 'text-gray-900 border-b-2 border-black' : 'text-gray-400 hover:text-gray-600'}`}
+                  >
+                     {t.materials} <span className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded-full text-gray-500 ml-1">{stickers.length}</span>
+                  </button>
+               </div>
+               
+               <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
+                  {sidebarTab === 'templates' ? (
+                      presets.map(p => (
+                          <button 
+                            key={p} 
+                            onClick={() => handleApplyPreset(p)}
+                            className="relative group aspect-square rounded-md overflow-hidden border border-gray-200 hover:border-blue-500 transition-all bg-gray-50"
+                            title={p}
+                          >
+                             <img 
+                                src={`/assets/${selectedModel}/example/${p}`} 
+                                alt={p} 
+                                className="w-full h-full object-cover" 
+                                loading="lazy"
+                             />
+                             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                          </button>
+                      ))
+                  ) : (
+                      stickers.map(s => (
+                          <button 
+                            key={s} 
+                            onClick={() => handleApplySticker(s)}
+                            className="relative group aspect-square rounded-md overflow-hidden border border-gray-200 hover:border-blue-500 transition-all bg-white p-2 flex items-center justify-center"
+                            title={s}
+                          >
+                             <img 
+                                src={`/assets/stickers/${s}`} 
+                                alt={s} 
+                                className="w-full h-full object-contain" 
+                                loading="lazy"
+                             />
+                          </button>
+                      ))
+                  )}
+                  
+                  {sidebarTab === 'templates' && presets.length === 0 && (
+                      <div className="col-span-2 text-center py-8 text-xs text-gray-400">
+                          No templates found for this model.
+                      </div>
+                  )}
+                   {sidebarTab === 'stickers' && stickers.length === 0 && (
+                      <div className="col-span-2 text-center py-8 text-xs text-gray-400">
+                          No stickers found.
+                      </div>
+                  )}
                </div>
             </section>
 
